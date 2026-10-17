@@ -1,0 +1,14 @@
+# Binaries
+wlservice
+*.exe
+
+# OS / Editor
+.DS_Store
+*.swp
+*.log
+
+# Environment files
+.env
+*.env
+!.env.example
+*.rsc
