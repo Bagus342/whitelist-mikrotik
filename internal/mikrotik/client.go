@@ -217,18 +217,42 @@ func SanitizeHostname(raw string) string {
 	return res
 }
 
-// ResolveHostname attempts a reverse DNS lookup of the target IP with a 1-second timeout.
+// ResolveHostname attempts a reverse DNS lookup of the target IP.
+// It queries the system resolver first, then falls back to public DNS resolvers (1.1.1.1, 8.8.8.8).
 // If lookup succeeds, it returns the sanitized domain name.
 // If lookup fails or has no PTR record, it falls back to the IP address itself.
 func ResolveHostname(ctx context.Context, ip string) string {
-	lookupCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	lookupCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
+	// 1. Try default system resolver
 	names, err := net.DefaultResolver.LookupAddr(lookupCtx, ip)
 	if err == nil && len(names) > 0 {
 		cleaned := SanitizeHostname(names[0])
 		if cleaned != "" {
 			return cleaned
+		}
+	}
+
+	// 2. Try public DNS resolvers as fallback (Cloudflare & Google)
+	publicDNS := []string{"1.1.1.1:53", "8.8.8.8:53"}
+	for _, dnsAddr := range publicDNS {
+		if lookupCtx.Err() != nil {
+			break
+		}
+		r := &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{Timeout: 1200 * time.Millisecond}
+				return d.DialContext(ctx, "udp", dnsAddr)
+			},
+		}
+		publicNames, pErr := r.LookupAddr(lookupCtx, ip)
+		if pErr == nil && len(publicNames) > 0 {
+			cleaned := SanitizeHostname(publicNames[0])
+			if cleaned != "" {
+				return cleaned
+			}
 		}
 	}
 

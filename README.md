@@ -295,31 +295,47 @@ $env:WL_WINBOX = "true"
 ### 2. Menggunakan Perintah Manual `curl`
 
 #### Mendaftarkan / Memperpanjang IP (POST)
-- **Hanya Whitelist**:
+- **Linux / macOS (Deteksi IP & Hostname Otomatis)**:
   ```bash
-  curl -sS -H "Authorization: Bearer <TOKEN>" -d "ip=$(curl -s https://ifconfig.me)" https://wl.contoh.co.id/v1/whitelist
+  # Whitelist standar
+  curl -sS -H "Authorization: Bearer <TOKEN>" \
+    -d "ip=$(curl -s https://ifconfig.me)" \
+    -d "hostname=$(hostname 2>/dev/null || uname -n)" \
+    https://wl.contoh.co.id/v1/whitelist
+
+  # Whitelist + Allow Winbox
+  curl -sS -H "Authorization: Bearer <TOKEN>" \
+    -d "ip=$(curl -s https://ifconfig.me)" \
+    -d "hostname=$(hostname 2>/dev/null || uname -n)" \
+    -d "winbox" \
+    https://wl.contoh.co.id/v1/whitelist
   ```
-- **Whitelist + Allow Akses Winbox**:
-  ```bash
-  curl -sS -H "Authorization: Bearer <TOKEN>" -d "ip=$(curl -s https://ifconfig.me)" -d "winbox" https://wl.contoh.co.id/v1/whitelist
+- **Windows (PowerShell - Deteksi IP & Hostname Otomatis)**:
+  ```powershell
+  # Whitelist + Allow Winbox
+  curl.exe -sS -H "Authorization: Bearer <TOKEN>" `
+    -d "ip=$(curl.exe -s https://ifconfig.me)" `
+    -d "hostname=$env:COMPUTERNAME" `
+    -d "winbox" `
+    https://wl.contoh.co.id/v1/whitelist
   ```
 - **Menggunakan Body JSON**:
   ```bash
   curl -sS -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
-    -d '{"ip": "180.252.167.103", "winbox": true, "hostname": "laptop-kantor"}' \
+    -d "{\"ip\": \"$(curl -s https://ifconfig.me)\", \"hostname\": \"$(hostname 2>/dev/null || uname -n)\", \"winbox\": true}" \
     https://wl.contoh.co.id/v1/whitelist
   ```
 - **Contoh Respons (text/plain)**:
   ```text
-  OK ip=180.252.167.103 expires=2026-10-16T19:00:00+07:00 winbox=allowed
+  OK ip=180.252.167.103 expires=2026-10-18T03:00:00+07:00 winbox=allowed
   ```
 - **Respons JSON (dengan `Accept: application/json`)**:
   ```json
   {
     "status": "ok",
     "ip": "180.252.167.103",
-    "hostname": "laptop-kantor",
-    "expires": "2026-10-16T19:00:00+07:00",
+    "hostname": "laptop-engineer",
+    "expires": "2026-10-18T03:00:00+07:00",
     "action": "added",
     "winbox_allowed": true,
     "req": "a1b2c3d4e5f60708"

@@ -50,9 +50,39 @@ fi
 IP=$(echo "$IP" | tr -d '[:space:]')
 echo "IP Publik terdeteksi: $IP"
 
-CLIENT_HOSTNAME="${WL_HOSTNAME:-$(hostname 2>/dev/null || uname -n 2>/dev/null || echo "")}"
+detect_hostname() {
+    if [[ -n "${WL_HOSTNAME:-}" ]]; then
+        echo "$WL_HOSTNAME"
+        return
+    fi
+    local h=""
+    # 1. Try hostname command
+    if command -v hostname >/dev/null 2>&1; then
+        h=$(hostname 2>/dev/null || true)
+    fi
+    # 2. Try uname -n
+    if [[ -z "$h" || "$h" == "localhost" || "$h" == "localhost.localdomain" ]] && command -v uname >/dev/null 2>&1; then
+        h=$(uname -n 2>/dev/null || true)
+    fi
+    # 3. Try /etc/hostname
+    if [[ -z "$h" || "$h" == "localhost" || "$h" == "localhost.localdomain" ]] && [[ -f /etc/hostname ]]; then
+        h=$(head -n 1 /etc/hostname 2>/dev/null || true)
+    fi
+    # 4. Try $HOSTNAME env variable
+    if [[ -z "$h" || "$h" == "localhost" || "$h" == "localhost.localdomain" ]] && [[ -n "${HOSTNAME:-}" ]]; then
+        h="$HOSTNAME"
+    fi
+    # 5. Fallback to user
+    if [[ -z "$h" || "$h" == "localhost" || "$h" == "localhost.localdomain" ]]; then
+        h="${USER:-$(whoami 2>/dev/null || id -un 2>/dev/null || echo "")}"
+    fi
+    h=$(echo "$h" | tr -d '[:space:]')
+    echo "$h"
+}
+
+CLIENT_HOSTNAME=$(detect_hostname)
 if [[ -n "$CLIENT_HOSTNAME" ]]; then
-    echo "Hostname klien: $CLIENT_HOSTNAME"
+    echo "Hostname terdeteksi otomatis: $CLIENT_HOSTNAME"
 fi
 
 if [[ "$ENABLE_WINBOX" == "true" ]]; then
@@ -68,6 +98,10 @@ fi
 
 if [[ "$ACTION" == "on" ]]; then
     echo "Mengirim permintaan whitelist (POST)..."
+    POST_HEADERS=("${AUTH_HEADER[@]}")
+    if [[ -n "$CLIENT_HOSTNAME" ]]; then
+        POST_HEADERS+=(-H "X-Hostname: $CLIENT_HOSTNAME")
+    fi
     POST_ARGS=(-d "ip=$IP")
     if [[ -n "$CLIENT_HOSTNAME" ]]; then
         POST_ARGS+=(-d "hostname=$CLIENT_HOSTNAME")
@@ -75,7 +109,7 @@ if [[ "$ACTION" == "on" ]]; then
     if [[ "$ENABLE_WINBOX" == "true" ]]; then
         POST_ARGS+=(-d "winbox")
     fi
-    curl -sS "${AUTH_HEADER[@]}" "${POST_ARGS[@]}" "$TARGET_ENDPOINT"
+    curl -sS "${POST_HEADERS[@]}" "${POST_ARGS[@]}" "$TARGET_ENDPOINT"
     echo ""
 elif [[ "$ACTION" == "off" ]]; then
     echo "Mengirim permintaan penghapusan whitelist (DELETE)..."

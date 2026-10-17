@@ -871,3 +871,121 @@ func TestHandler_PostWhitelist_WinboxError_Returns502(t *testing.T) {
 		t.Errorf("response leaked internal error details: %s", body)
 	}
 }
+
+func TestHandler_PostWhitelist_AutoDetectHostname_XHostnameHeader(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	ip := "203.0.113.30"
+	expectedHost := "macbook-air-m2"
+
+	// Request has IP in body, but NO hostname in body. Hostname is in X-Hostname header.
+	form := url.Values{}
+	form.Set("ip", ip)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/whitelist", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Hostname", expectedHost)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp JSONResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	if resp.Hostname != expectedHost {
+		t.Errorf("expected Hostname %q from X-Hostname header, got %q", expectedHost, resp.Hostname)
+	}
+
+	entry, ok := mockMk.Entries[ip]
+	if !ok {
+		t.Fatalf("expected entry for %s", ip)
+	}
+	if entry.Comment != "wl|"+expectedHost {
+		t.Errorf("expected comment 'wl|%s', got %q", expectedHost, entry.Comment)
+	}
+}
+
+func TestHandler_PostWhitelist_AutoDetectHostname_QueryParam(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	ip := "203.0.113.31"
+	expectedHost := "thinkpad-t14"
+
+	// Request has hostname in query parameter
+	form := url.Values{}
+	form.Set("ip", ip)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/whitelist?hostname="+expectedHost, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp JSONResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	if resp.Hostname != expectedHost {
+		t.Errorf("expected Hostname %q from query param, got %q", expectedHost, resp.Hostname)
+	}
+
+	entry, ok := mockMk.Entries[ip]
+	if !ok {
+		t.Fatalf("expected entry for %s", ip)
+	}
+	if entry.Comment != "wl|"+expectedHost {
+		t.Errorf("expected comment 'wl|%s', got %q", expectedHost, entry.Comment)
+	}
+}
+
+func TestHandler_PostWhitelist_AutoDetectHostname_XClientHostnameHeader(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	ip := "203.0.113.32"
+	expectedHost := "dell-xps-15"
+
+	form := url.Values{}
+	form.Set("ip", ip)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/whitelist", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Client-Hostname", expectedHost)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp JSONResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	if resp.Hostname != expectedHost {
+		t.Errorf("expected Hostname %q from X-Client-Hostname header, got %q", expectedHost, resp.Hostname)
+	}
+
+	entry, ok := mockMk.Entries[ip]
+	if !ok {
+		t.Fatalf("expected entry for %s", ip)
+	}
+	if entry.Comment != "wl|"+expectedHost {
+		t.Errorf("expected comment 'wl|%s', got %q", expectedHost, entry.Comment)
+	}
+}

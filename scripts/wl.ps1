@@ -62,18 +62,32 @@ $ip = $ip.Trim()
 Write-Host "IP Publik terdeteksi: $ip"
 
 if ([string]::IsNullOrWhiteSpace($Hostname)) {
+    $Hostname = $env:WL_HOSTNAME
+}
+if ([string]::IsNullOrWhiteSpace($Hostname)) {
     $Hostname = $env:COMPUTERNAME
-    if ([string]::IsNullOrWhiteSpace($Hostname)) {
+}
+if ([string]::IsNullOrWhiteSpace($Hostname)) {
+    try {
         $Hostname = [System.Net.Dns]::GetHostName()
+    } catch {
+        $Hostname = $null
     }
 }
+if ([string]::IsNullOrWhiteSpace($Hostname)) {
+    $Hostname = $env:USERNAME
+}
 if (-not [string]::IsNullOrWhiteSpace($Hostname)) {
-    Write-Host "Hostname klien: $Hostname"
+    $Hostname = $Hostname.Trim()
+    Write-Host "Hostname terdeteksi otomatis: $Hostname"
 }
 
 $headers = @{}
 if (-not [string]::IsNullOrWhiteSpace($AuthToken)) {
     $headers["Authorization"] = "Bearer $AuthToken"
+}
+if (-not [string]::IsNullOrWhiteSpace($Hostname)) {
+    $headers["X-Hostname"] = $Hostname
 }
 
 $isWinbox = $Winbox.IsPresent -or ($env:WL_WINBOX -eq "true") -or ($env:WL_WINBOX -eq "1")
@@ -87,6 +101,9 @@ if ($Action -eq "on") {
         $curlArgs = @("-sS")
         if (-not [string]::IsNullOrWhiteSpace($AuthToken)) {
             $curlArgs += @("-H", "Authorization: Bearer $AuthToken")
+        }
+        if (-not [string]::IsNullOrWhiteSpace($Hostname)) {
+            $curlArgs += @("-H", "X-Hostname: $Hostname")
         }
         $curlArgs += @("-d", "ip=$ip")
         if (-not [string]::IsNullOrWhiteSpace($Hostname)) {

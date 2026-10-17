@@ -209,7 +209,24 @@ func (h *Handler) parseIPForm(w http.ResponseWriter, r *http.Request) (netip.Add
 
 	SetTargetIP(r.Context(), addr.String())
 
-	// Extract or resolve target hostname
+	// Extract target hostname from body, query parameters, or HTTP headers
+	if rawHostname == "" {
+		rawHostname = strings.TrimSpace(r.URL.Query().Get("hostname"))
+	}
+	if rawHostname == "" {
+		rawHostname = strings.TrimSpace(r.URL.Query().Get("host"))
+	}
+	if rawHostname == "" {
+		rawHostname = strings.TrimSpace(r.Header.Get("X-Hostname"))
+	}
+	if rawHostname == "" {
+		rawHostname = strings.TrimSpace(r.Header.Get("X-Client-Hostname"))
+	}
+	if rawHostname == "" {
+		rawHostname = strings.TrimSpace(r.Header.Get("X-Device-Name"))
+	}
+
+	// Sanitize hostname, or automatically resolve via reverse DNS if not provided
 	hostname := mikrotik.SanitizeHostname(rawHostname)
 	if hostname == "" {
 		hostname = mikrotik.ResolveHostname(r.Context(), addr.String())
