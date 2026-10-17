@@ -2,17 +2,20 @@ package mikrotik
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 )
 
 // MockClient is an in-memory implementation of Client for unit testing.
 type MockClient struct {
-	mu          sync.Mutex
-	WhitelistFn func(ctx context.Context, ip string) (*WhitelistResult, error)
-	RemoveFn    func(ctx context.Context, ip string) error
-	PingFn      func(ctx context.Context) error
-	CloseFn     func() error
+	mu             sync.Mutex
+	WhitelistFn    func(ctx context.Context, ip string, hostname ...string) (*WhitelistResult, error)
+	RemoveFn       func(ctx context.Context, ip string) error
+	AllowWinboxFn  func(ctx context.Context, ip string) error
+	RemoveWinboxFn func(ctx context.Context, ip string) error
+	PingFn         func(ctx context.Context) error
+	CloseFn        func() error
 
 	// In-memory store for simulating behavior if custom functions are not provided.
 	// Entries represents the whitelist address list (key: IP).
@@ -20,6 +23,9 @@ type MockClient struct {
 
 	// AbuseEntries represents the "port-forward-abuse" address list (key: IP).
 	AbuseEntries map[string]MockEntry
+
+	// WinboxAddresses stores the allowed addresses for the simulated winbox service.
+	WinboxAddresses []string
 }
 
 // MockEntry represents an address-list entry in MockClient.
@@ -35,8 +41,9 @@ type MockEntry struct {
 // NewMockClient initializes a new MockClient.
 func NewMockClient() *MockClient {
 	return &MockClient{
-		Entries:      make(map[string]MockEntry),
-		AbuseEntries: make(map[string]MockEntry),
+		Entries:         make(map[string]MockEntry),
+		AbuseEntries:    make(map[string]MockEntry),
+		WinboxAddresses: make([]string, 0),
 	}
 }
 
@@ -54,12 +61,12 @@ func (m *MockClient) AddAbuseEntry(ip string) {
 
 // Whitelist simulates adding or extending an address-list entry.
 // If the IP exists in AbuseEntries ("port-forward-abuse"), it removes it first.
-func (m *MockClient) Whitelist(ctx context.Context, ip string) (*WhitelistResult, error) {
+func (m *MockClient) Whitelist(ctx context.Context, ip string, hostname ...string) (*WhitelistResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.WhitelistFn != nil {
-		return m.WhitelistFn(ctx, ip)
+		return m.WhitelistFn(ctx, ip, hostname...)
 	}
 
 	// 1. If present in abuse list, remove it first
@@ -69,15 +76,28 @@ func (m *MockClient) Whitelist(ctx context.Context, ip string) (*WhitelistResult
 		removedFromAbuse = true
 	}
 
+	targetHost := ip
+	if len(hostname) > 0 && strings.TrimSpace(hostname[0]) != "" {
+		targetHost = SanitizeHostname(hostname[0])
+	}
+	if targetHost == "" {
+		targetHost = ip
+	}
+	comment := "wl|" + targetHost
+
 	expiresAt := time.Now().Add(8 * time.Hour)
 	entry, exists := m.Entries[ip]
 	if exists {
 		entry.Timeout = "8h"
 		entry.ExpiresAt = expiresAt
+		if strings.HasPrefix(entry.Comment, "wl|") {
+			entry.Comment = comment
+		}
 		m.Entries[ip] = entry
 		return &WhitelistResult{
 			Action:           ActionExtended,
 			IP:               ip,
+			Hostname:         targetHost,
 			ExpiresAt:        expiresAt,
 			RemovedFromAbuse: removedFromAbuse,
 		}, nil
@@ -87,7 +107,7 @@ func (m *MockClient) Whitelist(ctx context.Context, ip string) (*WhitelistResult
 		ID:        "*1",
 		List:      "remote-whitelist",
 		Address:   ip,
-		Comment:   "wl|" + time.Now().Format(time.RFC3339),
+		Comment:   comment,
 		Timeout:   "8h",
 		ExpiresAt: expiresAt,
 	}
@@ -95,6 +115,7 @@ func (m *MockClient) Whitelist(ctx context.Context, ip string) (*WhitelistResult
 	return &WhitelistResult{
 		Action:           ActionAdded,
 		IP:               ip,
+		Hostname:         targetHost,
 		ExpiresAt:        expiresAt,
 		RemovedFromAbuse: removedFromAbuse,
 	}, nil
@@ -142,4 +163,59 @@ func (m *MockClient) Close() error {
 		return m.CloseFn()
 	}
 	return nil
+}
+
+// AllowWinbox simulates adding the target IP (as /32 or /128) to the allowed Winbox addresses.
+func (m *MockClient) AllowWinbox(ctx context.Context, ip string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.AllowWinboxFn != nil {
+		return m.AllowWinboxFn(ctx, ip)
+	}
+
+	cidr := FormatWinboxCIDR(ip)
+	for _, addr := range m.WinboxAddresses {
+		if addr == cidr || addr == ip || strings.TrimSuffix(addr, "/32") == ip || strings.TrimSuffix(addr, "/128") == ip {
+			return nil
+		}
+	}
+
+	m.WinboxAddresses = append(m.WinboxAddresses, cidr)
+	return nil
+}
+
+// RemoveWinbox simulates removing the target IP from the allowed Winbox addresses.
+func (m *MockClient) RemoveWinbox(ctx context.Context, ip string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.RemoveWinboxFn != nil {
+		return m.RemoveWinboxFn(ctx, ip)
+	}
+
+	cidr := FormatWinboxCIDR(ip)
+	var filtered []string
+	for _, addr := range m.WinboxAddresses {
+		if addr == cidr || addr == ip || strings.TrimSuffix(addr, "/32") == ip || strings.TrimSuffix(addr, "/128") == ip {
+			continue
+		}
+		filtered = append(filtered, addr)
+	}
+	m.WinboxAddresses = filtered
+	return nil
+}
+
+// HasWinboxAddress checks whether an IP or CIDR is present in the mock Winbox addresses.
+func (m *MockClient) HasWinboxAddress(ip string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cidr := FormatWinboxCIDR(ip)
+	for _, addr := range m.WinboxAddresses {
+		if addr == cidr || addr == ip || strings.TrimSuffix(addr, "/32") == ip || strings.TrimSuffix(addr, "/128") == ip {
+			return true
+		}
+	}
+	return false
 }

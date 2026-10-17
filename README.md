@@ -5,8 +5,10 @@ Layanan HTTP sederhana, aman, dan *production-ready* yang dibangun dengan Go unt
 ## Fitur Utama
 
 - **Otomatisasi Whitelist**: Menambahkan IP baru dengan timeout terbatas atau memperpanjang masa berlaku jika IP sudah ada (`POST /v1/whitelist`).
+- **Identifikasi Hostname Target**: Komentar entri MikroTik disimpan dengan format `wl|<nama_hostname_target>` yang diambil dari parameter `hostname` klien, hasil resolusi reverse DNS IP target, atau fallback ke IP target jika tidak ditemukan.
 - **Autentikasi Bearer Token**: Mengamankan endpoint `/v1/whitelist` dengan Bearer Token (`Authorization: Bearer <token>`) yang diverifikasi dengan constant-time comparison (bebas timing attack). Endpoint `/healthz` tetap terbuka untuk health probe.
 - **Auto-Unblock dari Abuse List**: Jika IP target terdaftar di address-list `port-forward-abuse`, entri tersebut otomatis dihapus dari list abuse sebelum didaftarkan ke `remote-whitelist`.
+- **Akses Layanan Winbox (Opsional)**: Dengan menyertakan parameter `winbox` di body request (`POST`), IP target otomatis ditambahkan ke daftar alamat yang diizinkan pada service Winbox MikroTik (`/ip service set [find name=winbox] address=([get [find name=winbox] address],<target_ip>/32)`). Pada `DELETE`, parameter `winbox` akan menghapus IP dari service Winbox.
 - **Pembersihan Bersih**: Menghapus IP dari whitelist (`DELETE /v1/whitelist`) hanya jika entri dibuat oleh sistem (berawalan komentar `wl|`), sehingga entri manual admin terlindungi.
 - **Validasi IP Ketat**:
   - Menghapus trailing whitespace/newline (output umum `curl https://ifconfig.me`).
@@ -254,15 +256,19 @@ wl.contoh.co.id {
 # Daftarkan IP publik ke whitelist
 ./scripts/wl.sh on
 
-# Hapus IP publik dari whitelist
-./scripts/wl.sh off
+# Daftarkan IP publik ke whitelist SEKALIGUS allow akses Winbox
+./scripts/wl.sh on --winbox
+
+# Hapus IP publik dari whitelist (dan dari Winbox jika --winbox disertakan)
+./scripts/wl.sh off --winbox
 
 # Menggunakan URL service custom dan Bearer token
-./scripts/wl.sh on https://wl.contoh.co.id "token_anda"
+./scripts/wl.sh on https://wl.contoh.co.id "token_anda" --winbox
 
 # Atau atur via environment variables:
 export WL_SERVICE_URL="https://wl.contoh.co.id"
 export WL_AUTH_TOKEN="token_anda"
+export WL_WINBOX=true
 ./scripts/wl.sh on
 ```
 
@@ -271,55 +277,67 @@ export WL_AUTH_TOKEN="token_anda"
 # Daftarkan IP publik ke whitelist
 .\scripts\wl.ps1 on
 
-# Hapus IP publik dari whitelist
-.\scripts\wl.ps1 off
+# Daftarkan IP publik ke whitelist SEKALIGUS allow akses Winbox
+.\scripts\wl.ps1 on -Winbox
+
+# Hapus IP publik dari whitelist (dan dari Winbox jika -Winbox disertakan)
+.\scripts\wl.ps1 off -Winbox
 
 # Menggunakan URL service custom dan Bearer token
-.\scripts\wl.ps1 on -ServiceUrl "https://wl.contoh.co.id" -AuthToken "token_anda"
+.\scripts\wl.ps1 on -ServiceUrl "https://wl.contoh.co.id" -AuthToken "token_anda" -Winbox
 
 # Atau atur via environment variable:
 $env:WL_AUTH_TOKEN = "token_anda"
+$env:WL_WINBOX = "true"
 .\scripts\wl.ps1 on
 ```
 
 ### 2. Menggunakan Perintah Manual `curl`
 
 #### Mendaftarkan / Memperpanjang IP (POST)
-- **Linux/macOS**:
+- **Hanya Whitelist**:
   ```bash
   curl -sS -H "Authorization: Bearer <TOKEN>" -d "ip=$(curl -s https://ifconfig.me)" https://wl.contoh.co.id/v1/whitelist
   ```
-- **Windows (PowerShell)**:
-  ```powershell
-  curl.exe -sS -H "Authorization: Bearer <TOKEN>" -d "ip=$(curl.exe -s https://ifconfig.me)" https://wl.contoh.co.id/v1/whitelist
+- **Whitelist + Allow Akses Winbox**:
+  ```bash
+  curl -sS -H "Authorization: Bearer <TOKEN>" -d "ip=$(curl -s https://ifconfig.me)" -d "winbox" https://wl.contoh.co.id/v1/whitelist
+  ```
+- **Menggunakan Body JSON**:
+  ```bash
+  curl -sS -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+    -d '{"ip": "180.252.167.103", "winbox": true, "hostname": "laptop-kantor"}' \
+    https://wl.contoh.co.id/v1/whitelist
   ```
 - **Contoh Respons (text/plain)**:
   ```text
-  OK ip=203.0.113.5 expires=2026-10-16T19:00:00+07:00
+  OK ip=180.252.167.103 expires=2026-10-16T19:00:00+07:00 winbox=allowed
   ```
 - **Respons JSON (dengan `Accept: application/json`)**:
   ```json
   {
     "status": "ok",
-    "ip": "203.0.113.5",
+    "ip": "180.252.167.103",
+    "hostname": "laptop-kantor",
     "expires": "2026-10-16T19:00:00+07:00",
     "action": "added",
+    "winbox_allowed": true,
     "req": "a1b2c3d4e5f60708"
   }
   ```
 
 #### Menghapus IP dari Whitelist (DELETE)
-- **Linux/macOS**:
+- **Hanya Hapus dari Whitelist**:
   ```bash
   curl -sS -H "Authorization: Bearer <TOKEN>" -X DELETE -d "ip=$(curl -s https://ifconfig.me)" https://wl.contoh.co.id/v1/whitelist
   ```
-- **Windows (PowerShell)**:
-  ```powershell
-  curl.exe -sS -H "Authorization: Bearer <TOKEN>" -X DELETE -d "ip=$(curl.exe -s https://ifconfig.me)" https://wl.contoh.co.id/v1/whitelist
+- **Hapus dari Whitelist dan Winbox**:
+  ```bash
+  curl -sS -H "Authorization: Bearer <TOKEN>" -X DELETE -d "ip=$(curl -s https://ifconfig.me)" -d "winbox" https://wl.contoh.co.id/v1/whitelist
   ```
 - **Contoh Respons (text/plain)**:
   ```text
-  OK ip=203.0.113.5 action=removed
+  OK ip=180.252.167.103 action=removed winbox=removed
   ```
 
 #### Health Check

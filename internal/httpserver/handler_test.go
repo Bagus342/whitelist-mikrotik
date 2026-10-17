@@ -173,7 +173,7 @@ func TestHandler_MikrotikError_502NoLeak(t *testing.T) {
 	_, mockMk, router := setupTestServer()
 
 	// Configure mock to simulate an internal error with sensitive details
-	mockMk.WhitelistFn = func(ctx context.Context, ip string) (*mikrotik.WhitelistResult, error) {
+	mockMk.WhitelistFn = func(ctx context.Context, ip string, hostname ...string) (*mikrotik.WhitelistResult, error) {
 		return nil, errors.New("cannot connect to 192.168.88.1:8728 with user admin: secret credentials error")
 	}
 
@@ -572,5 +572,302 @@ func TestHandler_BearerAuth_HealthzUnprotected(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK on /healthz without auth, got %d", w.Code)
+	}
+}
+
+func TestHandler_PostWhitelist_WithCustomHostname(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	ip := "203.0.113.70"
+	customHost := "laptop-finance"
+
+	form := url.Values{}
+	form.Set("ip", ip)
+	form.Set("hostname", customHost)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/whitelist", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+	}
+
+	entry, ok := mockMk.Entries[ip]
+	if !ok {
+		t.Fatalf("expected entry for %s", ip)
+	}
+	if entry.Comment != "wl|"+customHost {
+		t.Errorf("expected comment 'wl|%s', got %q", customHost, entry.Comment)
+	}
+}
+
+func TestHandler_PostWhitelist_WithCustomHostname_JSON(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	ip := "203.0.113.71"
+	customHost := "pc-marketing"
+
+	form := url.Values{}
+	form.Set("ip", ip)
+	form.Set("hostname", customHost)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/whitelist", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp JSONResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	if resp.Hostname != customHost {
+		t.Errorf("expected JSON Hostname %q, got %q", customHost, resp.Hostname)
+	}
+
+	entry, ok := mockMk.Entries[ip]
+	if !ok {
+		t.Fatalf("expected entry for %s", ip)
+	}
+	if entry.Comment != "wl|"+customHost {
+		t.Errorf("expected comment 'wl|%s', got %q", customHost, entry.Comment)
+	}
+}
+
+func TestHandler_PostWhitelist_WithWinbox_Flag(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	ip := "203.0.113.15"
+
+	// Pass winbox as flag: "ip=...&winbox"
+	bodyStr := "ip=" + ip + "&winbox"
+	req := httptest.NewRequest(http.MethodPost, "/v1/whitelist", strings.NewReader(bodyStr))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	body := strings.TrimSpace(w.Body.String())
+	if !strings.Contains(body, "winbox=allowed") {
+		t.Errorf("expected response to contain 'winbox=allowed', got: %s", body)
+	}
+
+	if !mockMk.HasWinboxAddress(ip) {
+		t.Errorf("expected IP %s to be allowed in mock Winbox", ip)
+	}
+}
+
+func TestHandler_PostWhitelist_WithWinbox_ValueTrue(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	ip := "203.0.113.16"
+
+	form := url.Values{}
+	form.Set("ip", ip)
+	form.Set("winbox", "true")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/whitelist", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	body := strings.TrimSpace(w.Body.String())
+	if !strings.Contains(body, "winbox=allowed") {
+		t.Errorf("expected response to contain 'winbox=allowed', got: %s", body)
+	}
+
+	if !mockMk.HasWinboxAddress(ip) {
+		t.Errorf("expected IP %s to be allowed in mock Winbox", ip)
+	}
+}
+
+func TestHandler_PostWhitelist_WithWinbox_JSON(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	ip := "203.0.113.17"
+
+	form := url.Values{}
+	form.Set("ip", ip)
+	form.Set("winbox", "1")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/whitelist", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp JSONResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	if !resp.WinboxAllowed {
+		t.Errorf("expected WinboxAllowed=true, got false")
+	}
+
+	if !mockMk.HasWinboxAddress(ip) {
+		t.Errorf("expected IP %s to be allowed in mock Winbox", ip)
+	}
+}
+
+func TestHandler_PostWhitelist_WithJSONBody_AndWinbox(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	ip := "203.0.113.18"
+	jsonBody := `{"ip": "203.0.113.18", "winbox": true, "hostname": "dev-box"}`
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/whitelist", strings.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp JSONResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	if !resp.WinboxAllowed {
+		t.Errorf("expected WinboxAllowed=true, got false")
+	}
+	if resp.Hostname != "dev-box" {
+		t.Errorf("expected Hostname dev-box, got %s", resp.Hostname)
+	}
+
+	if !mockMk.HasWinboxAddress(ip) {
+		t.Errorf("expected IP %s to be allowed in mock Winbox", ip)
+	}
+}
+
+func TestHandler_PostWhitelist_WithoutWinbox_DoesNotAllowWinbox(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	ip := "203.0.113.19"
+
+	form := url.Values{}
+	form.Set("ip", ip)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/whitelist", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp JSONResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	if resp.WinboxAllowed {
+		t.Errorf("expected WinboxAllowed=false when winbox param omitted, got true")
+	}
+
+	if mockMk.HasWinboxAddress(ip) {
+		t.Errorf("did not expect IP %s to be in mock Winbox", ip)
+	}
+}
+
+func TestHandler_DeleteWhitelist_WithWinbox(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	ip := "203.0.113.20"
+	mockMk.Entries[ip] = mikrotik.MockEntry{
+		ID:      "*1",
+		List:    "remote-whitelist",
+		Address: ip,
+		Comment: "wl|" + ip,
+	}
+	_ = mockMk.AllowWinbox(context.Background(), ip)
+
+	if !mockMk.HasWinboxAddress(ip) {
+		t.Fatalf("expected IP %s to be in mock Winbox initially", ip)
+	}
+
+	form := url.Values{}
+	form.Set("ip", ip)
+	form.Set("winbox", "true")
+
+	req := httptest.NewRequest(http.MethodDelete, "/v1/whitelist", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp JSONResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode JSON response: %v", err)
+	}
+
+	if !resp.WinboxRemoved {
+		t.Errorf("expected WinboxRemoved=true, got false")
+	}
+
+	if mockMk.HasWinboxAddress(ip) {
+		t.Errorf("expected IP %s to be removed from mock Winbox", ip)
+	}
+}
+
+func TestHandler_PostWhitelist_WinboxError_Returns502(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	mockMk.AllowWinboxFn = func(ctx context.Context, ip string) error {
+		return errors.New("simulated mikrotik winbox service failure")
+	}
+
+	form := url.Values{}
+	form.Set("ip", "203.0.113.21")
+	form.Set("winbox", "true")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/whitelist", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 Bad Gateway on winbox failure, got %d: %s", w.Code, w.Body.String())
+	}
+
+	body := strings.TrimSpace(w.Body.String())
+	if strings.Contains(body, "simulated mikrotik") {
+		t.Errorf("response leaked internal error details: %s", body)
 	}
 }

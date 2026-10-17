@@ -20,7 +20,13 @@ param (
     [string]$ServiceUrl = $env:WL_SERVICE_URL,
 
     [Parameter(Mandatory = $false, Position = 2)]
-    [string]$AuthToken = $env:WL_AUTH_TOKEN
+    [string]$AuthToken = $env:WL_AUTH_TOKEN,
+
+    [Parameter(Mandatory = $false, Position = 3)]
+    [string]$Hostname = $env:WL_HOSTNAME,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Winbox
 )
 
 if ([string]::IsNullOrWhiteSpace($ServiceUrl)) {
@@ -55,34 +61,71 @@ if ([string]::IsNullOrWhiteSpace($ip)) {
 $ip = $ip.Trim()
 Write-Host "IP Publik terdeteksi: $ip"
 
+if ([string]::IsNullOrWhiteSpace($Hostname)) {
+    $Hostname = $env:COMPUTERNAME
+    if ([string]::IsNullOrWhiteSpace($Hostname)) {
+        $Hostname = [System.Net.Dns]::GetHostName()
+    }
+}
+if (-not [string]::IsNullOrWhiteSpace($Hostname)) {
+    Write-Host "Hostname klien: $Hostname"
+}
+
 $headers = @{}
 if (-not [string]::IsNullOrWhiteSpace($AuthToken)) {
     $headers["Authorization"] = "Bearer $AuthToken"
 }
 
+$isWinbox = $Winbox.IsPresent -or ($env:WL_WINBOX -eq "true") -or ($env:WL_WINBOX -eq "1")
+if ($isWinbox) {
+    Write-Host "Akses Winbox: aktif (-Winbox)"
+}
+
 if ($Action -eq "on") {
     Write-Host "Mengirim permintaan whitelist (POST)..."
     if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+        $curlArgs = @("-sS")
         if (-not [string]::IsNullOrWhiteSpace($AuthToken)) {
-            & curl.exe -sS -H "Authorization: Bearer $AuthToken" -d "ip=$ip" "$TargetEndpoint"
-        } else {
-            & curl.exe -sS -d "ip=$ip" "$TargetEndpoint"
+            $curlArgs += @("-H", "Authorization: Bearer $AuthToken")
         }
+        $curlArgs += @("-d", "ip=$ip")
+        if (-not [string]::IsNullOrWhiteSpace($Hostname)) {
+            $curlArgs += @("-d", "hostname=$Hostname")
+        }
+        if ($isWinbox) {
+            $curlArgs += @("-d", "winbox")
+        }
+        $curlArgs += $TargetEndpoint
+        & curl.exe @curlArgs
     } else {
         $body = "ip=$([System.Uri]::EscapeDataString($ip))"
+        if (-not [string]::IsNullOrWhiteSpace($Hostname)) {
+            $body += "&hostname=$([System.Uri]::EscapeDataString($Hostname))"
+        }
+        if ($isWinbox) {
+            $body += "&winbox"
+        }
         $resp = Invoke-WebRequest -Uri $TargetEndpoint -Method POST -Headers $headers -Body $body -ContentType "application/x-www-form-urlencoded" -UseBasicParsing
         Write-Output $resp.Content
     }
 } elseif ($Action -eq "off") {
     Write-Host "Mengirim permintaan penghapusan whitelist (DELETE)..."
     if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+        $curlArgs = @("-sS", "-X", "DELETE")
         if (-not [string]::IsNullOrWhiteSpace($AuthToken)) {
-            & curl.exe -sS -H "Authorization: Bearer $AuthToken" -X DELETE -d "ip=$ip" "$TargetEndpoint"
-        } else {
-            & curl.exe -sS -X DELETE -d "ip=$ip" "$TargetEndpoint"
+            $curlArgs += @("-H", "Authorization: Bearer $AuthToken")
         }
+        $curlArgs += @("-d", "ip=$ip")
+        if ($isWinbox) {
+            $curlArgs += @("-d", "winbox")
+        }
+        $curlArgs += $TargetEndpoint
+        & curl.exe @curlArgs
     } else {
         $body = "ip=$([System.Uri]::EscapeDataString($ip))"
+        if ($isWinbox) {
+            $body += "&winbox"
+        }
         $resp = Invoke-WebRequest -Uri $TargetEndpoint -Method DELETE -Headers $headers -Body $body -ContentType "application/x-www-form-urlencoded" -UseBasicParsing
         Write-Output $resp.Content
     }

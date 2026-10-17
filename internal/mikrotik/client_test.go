@@ -155,3 +155,183 @@ func TestMockClient_Whitelist_PortForwardAbuseRemoval_ExistingWhitelist(t *testi
 		t.Errorf("expected %s to remain in Entries", ip)
 	}
 }
+
+func TestSanitizeHostname(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"laptop-budi", "laptop-budi"},
+		{"DESKTOP-123_abc", "DESKTOP-123_abc"},
+		{"my.host.name.", "my.host.name"},
+		{"pipe|injection", "pipe-injection"},
+		{"with spaces here", "with-spaces-here"},
+		{"bad!@#chars$%", "badchars"},
+		{"", ""},
+		{"   ", ""},
+	}
+
+	for _, tt := range tests {
+		got := SanitizeHostname(tt.input)
+		if got != tt.want {
+			t.Errorf("SanitizeHostname(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestMockClient_Whitelist_HostnameComment(t *testing.T) {
+	mock := NewMockClient()
+	ctx := context.Background()
+
+	ip := "203.0.113.88"
+
+	// 1. Whitelist with custom hostname
+	res, err := mock.Whitelist(ctx, ip, "macbook-pro")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if res.Hostname != "macbook-pro" {
+		t.Errorf("expected Hostname macbook-pro, got %s", res.Hostname)
+	}
+
+	entry, ok := mock.Entries[ip]
+	if !ok {
+		t.Fatalf("expected entry for %s", ip)
+	}
+
+	if entry.Comment != "wl|macbook-pro" {
+		t.Errorf("expected comment 'wl|macbook-pro', got %q", entry.Comment)
+	}
+
+	// 2. Extend with new hostname
+	resExtend, err := mock.Whitelist(ctx, ip, "macbook-pro-updated")
+	if err != nil {
+		t.Fatalf("unexpected error on extend: %v", err)
+	}
+	if resExtend.Hostname != "macbook-pro-updated" {
+		t.Errorf("expected Hostname macbook-pro-updated, got %s", resExtend.Hostname)
+	}
+
+	entryUpdated := mock.Entries[ip]
+	if entryUpdated.Comment != "wl|macbook-pro-updated" {
+		t.Errorf("expected updated comment 'wl|macbook-pro-updated', got %q", entryUpdated.Comment)
+	}
+
+	// 3. Whitelist without hostname -> defaults to IP
+	ip2 := "203.0.113.89"
+	res2, err := mock.Whitelist(ctx, ip2)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res2.Hostname != ip2 {
+		t.Errorf("expected Hostname %s, got %s", ip2, res2.Hostname)
+	}
+
+	entry2 := mock.Entries[ip2]
+	if entry2.Comment != "wl|"+ip2 {
+		t.Errorf("expected comment 'wl|%s', got %q", ip2, entry2.Comment)
+	}
+}
+
+func TestFormatWinboxCIDR(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"180.252.167.103", "180.252.167.103/32"},
+		{" 180.252.167.103 ", "180.252.167.103/32"},
+		{"192.168.1.0/24", "192.168.1.0/24"},
+		{"10.0.0.1/32", "10.0.0.1/32"},
+		{"2001:db8::1", "2001:db8::1/128"},
+		{"2001:db8::/64", "2001:db8::/64"},
+	}
+
+	for _, tt := range tests {
+		got := FormatWinboxCIDR(tt.input)
+		if got != tt.expected {
+			t.Errorf("FormatWinboxCIDR(%q) = %q; want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestParseAddressList(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected []string
+	}{
+		{"", nil},
+		{"   ", nil},
+		{"192.168.1.0/24", []string{"192.168.1.0/24"}},
+		{"192.168.1.0/24, 10.0.0.0/8", []string{"192.168.1.0/24", "10.0.0.0/8"}},
+		{",192.168.1.0/24,,10.0.0.0/8,", []string{"192.168.1.0/24", "10.0.0.0/8"}},
+	}
+
+	for _, tt := range tests {
+		got := parseAddressList(tt.input)
+		if len(got) != len(tt.expected) {
+			t.Fatalf("parseAddressList(%q) len = %d; want %d", tt.input, len(got), len(tt.expected))
+		}
+		for i := range got {
+			if got[i] != tt.expected[i] {
+				t.Errorf("parseAddressList(%q)[%d] = %q; want %q", tt.input, i, got[i], tt.expected[i])
+			}
+		}
+	}
+}
+
+func TestMockClient_AllowWinbox_And_RemoveWinbox(t *testing.T) {
+	mock := NewMockClient()
+	ctx := context.Background()
+
+	ip := "180.252.167.103"
+
+	// 1. Initially not present
+	if mock.HasWinboxAddress(ip) {
+		t.Fatalf("expected HasWinboxAddress false initially")
+	}
+
+	// 2. AllowWinbox adds /32
+	if err := mock.AllowWinbox(ctx, ip); err != nil {
+		t.Fatalf("unexpected error on AllowWinbox: %v", err)
+	}
+	if !mock.HasWinboxAddress(ip) {
+		t.Errorf("expected HasWinboxAddress true after allow")
+	}
+	if len(mock.WinboxAddresses) != 1 || mock.WinboxAddresses[0] != "180.252.167.103/32" {
+		t.Errorf("expected [180.252.167.103/32], got %v", mock.WinboxAddresses)
+	}
+
+	// 3. AllowWinbox again is idempotent (does not duplicate)
+	if err := mock.AllowWinbox(ctx, ip); err != nil {
+		t.Fatalf("unexpected error on second AllowWinbox: %v", err)
+	}
+	if len(mock.WinboxAddresses) != 1 {
+		t.Errorf("expected still 1 entry, got %v", mock.WinboxAddresses)
+	}
+
+	// 4. Add another IP
+	ip2 := "203.0.113.50"
+	if err := mock.AllowWinbox(ctx, ip2); err != nil {
+		t.Fatalf("unexpected error on AllowWinbox ip2: %v", err)
+	}
+	if len(mock.WinboxAddresses) != 2 {
+		t.Errorf("expected 2 entries, got %v", mock.WinboxAddresses)
+	}
+
+	// 5. Remove first IP
+	if err := mock.RemoveWinbox(ctx, ip); err != nil {
+		t.Fatalf("unexpected error on RemoveWinbox: %v", err)
+	}
+	if mock.HasWinboxAddress(ip) {
+		t.Errorf("expected ip to be removed from winbox")
+	}
+	if !mock.HasWinboxAddress(ip2) {
+		t.Errorf("expected ip2 to remain in winbox")
+	}
+
+	// 6. Remove non-existent IP (no-op, no error)
+	if err := mock.RemoveWinbox(ctx, "1.1.1.1"); err != nil {
+		t.Fatalf("unexpected error on RemoveWinbox nonexistent: %v", err)
+	}
+}

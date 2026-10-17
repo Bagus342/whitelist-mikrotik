@@ -2,8 +2,8 @@
 #
 # Helper script untuk mendaftarkan atau menghapus IP publik dari remote-whitelist.
 # Penggunaan:
-#   ./wl.sh on [service_url] [auth_token]
-#   ./wl.sh off [service_url] [auth_token]
+#   ./wl.sh on [service_url] [auth_token] [--winbox]
+#   ./wl.sh off [service_url] [auth_token] [--winbox]
 #
 set -euo pipefail
 
@@ -12,17 +12,32 @@ SERVICE_URL="${2:-${WL_SERVICE_URL:-https://wl.contoh.co.id}}"
 AUTH_TOKEN="${3:-${WL_AUTH_TOKEN:-${AUTH_BEARER_TOKEN:-}}}"
 
 if [[ "$ACTION" != "on" && "$ACTION" != "off" ]]; then
-    echo "Penggunaan: $0 {on|off} [service_url] [auth_token]"
+    echo "Penggunaan: $0 {on|off} [service_url] [auth_token] [--winbox]"
     echo ""
     echo "Perintah:"
     echo "  on   - Tambah atau perpanjang IP publik ke remote-whitelist"
     echo "  off  - Hapus IP publik dari remote-whitelist"
     echo ""
+    echo "Opsi:"
+    echo "  --winbox       - Izinkan juga IP untuk mengakses layanan Winbox MikroTik"
+    echo ""
     echo "Environment Variable:"
     echo "  WL_SERVICE_URL - URL whitelist service (default: https://wl.contoh.co.id)"
     echo "  WL_AUTH_TOKEN  - Bearer token autentikasi (opsional jika server mengaktifkan bearer)"
+    echo "  WL_HOSTNAME    - Hostname custom (default: otomatis dari hostname sistem)"
+    echo "  WL_WINBOX      - Set true / 1 untuk selalu mengizinkan akses Winbox"
     exit 1
 fi
+
+ENABLE_WINBOX=false
+if [[ "${WL_WINBOX:-}" == "true" || "${WL_WINBOX:-}" == "1" ]]; then
+    ENABLE_WINBOX=true
+fi
+for arg in "$@"; do
+    if [[ "$arg" == "--winbox" || "$arg" == "winbox" ]]; then
+        ENABLE_WINBOX=true
+    fi
+done
 
 echo "Mendeteksi IP publik via https://ifconfig.me (timeout 5s)..."
 if ! IP=$(curl -sS --max-time 5 https://ifconfig.me 2>/dev/null) || [[ -z "${IP//[[:space:]]/}" ]]; then
@@ -35,6 +50,15 @@ fi
 IP=$(echo "$IP" | tr -d '[:space:]')
 echo "IP Publik terdeteksi: $IP"
 
+CLIENT_HOSTNAME="${WL_HOSTNAME:-$(hostname 2>/dev/null || uname -n 2>/dev/null || echo "")}"
+if [[ -n "$CLIENT_HOSTNAME" ]]; then
+    echo "Hostname klien: $CLIENT_HOSTNAME"
+fi
+
+if [[ "$ENABLE_WINBOX" == "true" ]]; then
+    echo "Akses Winbox: aktif (--winbox)"
+fi
+
 TARGET_ENDPOINT="${SERVICE_URL%/}/v1/whitelist"
 
 AUTH_HEADER=()
@@ -44,10 +68,21 @@ fi
 
 if [[ "$ACTION" == "on" ]]; then
     echo "Mengirim permintaan whitelist (POST)..."
-    curl -sS "${AUTH_HEADER[@]}" -d "ip=$IP" "$TARGET_ENDPOINT"
+    POST_ARGS=(-d "ip=$IP")
+    if [[ -n "$CLIENT_HOSTNAME" ]]; then
+        POST_ARGS+=(-d "hostname=$CLIENT_HOSTNAME")
+    fi
+    if [[ "$ENABLE_WINBOX" == "true" ]]; then
+        POST_ARGS+=(-d "winbox")
+    fi
+    curl -sS "${AUTH_HEADER[@]}" "${POST_ARGS[@]}" "$TARGET_ENDPOINT"
     echo ""
 elif [[ "$ACTION" == "off" ]]; then
     echo "Mengirim permintaan penghapusan whitelist (DELETE)..."
-    curl -sS -X DELETE "${AUTH_HEADER[@]}" -d "ip=$IP" "$TARGET_ENDPOINT"
+    DELETE_ARGS=(-d "ip=$IP")
+    if [[ "$ENABLE_WINBOX" == "true" ]]; then
+        DELETE_ARGS+=(-d "winbox")
+    fi
+    curl -sS -X DELETE "${AUTH_HEADER[@]}" "${DELETE_ARGS[@]}" "$TARGET_ENDPOINT"
     echo ""
 fi

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -34,14 +35,17 @@ const (
 type WhitelistResult struct {
 	Action           Action
 	IP               string
+	Hostname         string
 	ExpiresAt        time.Time
 	RemovedFromAbuse bool
 }
 
-// Client defines the interface for interacting with MikroTik RouterOS firewall address lists.
+// Client defines the interface for interacting with MikroTik RouterOS firewall address lists and services.
 type Client interface {
-	Whitelist(ctx context.Context, ip string) (*WhitelistResult, error)
+	Whitelist(ctx context.Context, ip string, hostname ...string) (*WhitelistResult, error)
 	Remove(ctx context.Context, ip string) error
+	AllowWinbox(ctx context.Context, ip string) error
+	RemoveWinbox(ctx context.Context, ip string) error
 	Ping(ctx context.Context) error
 	Close() error
 }
@@ -182,18 +186,75 @@ func (c *RouterOSClient) findEntries(ctx context.Context, listName, ip string) (
 	return entries, nil
 }
 
+// SanitizeHostname cleans a hostname to be safe for MikroTik address-list comments.
+// It removes newlines, replaces pipe characters with hyphens (to preserve "wl|" delimiter parsing),
+// keeps alphanumeric, dots, hyphens, and underscores, and limits length to 64 characters.
+func SanitizeHostname(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	raw = strings.ReplaceAll(raw, "\r", "")
+	raw = strings.ReplaceAll(raw, "\n", "")
+	raw = strings.ReplaceAll(raw, "|", "-")
+
+	var b strings.Builder
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '.' || r == '_' {
+			b.WriteRune(r)
+		} else if r == ' ' {
+			b.WriteRune('-')
+		}
+	}
+
+	res := b.String()
+	if len(res) > 64 {
+		res = res[:64]
+	}
+
+	res = strings.Trim(res, ".-_")
+	return res
+}
+
+// ResolveHostname attempts a reverse DNS lookup of the target IP with a 1-second timeout.
+// If lookup succeeds, it returns the sanitized domain name.
+// If lookup fails or has no PTR record, it falls back to the IP address itself.
+func ResolveHostname(ctx context.Context, ip string) string {
+	lookupCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+
+	names, err := net.DefaultResolver.LookupAddr(lookupCtx, ip)
+	if err == nil && len(names) > 0 {
+		cleaned := SanitizeHostname(names[0])
+		if cleaned != "" {
+			return cleaned
+		}
+	}
+
+	return ip
+}
+
 // Whitelist checks if the IP is present in the abuse list (e.g. "port-forward-abuse").
 // If found, it removes the entry from the abuse list first.
 // Then it checks if the IP is already in the whitelist address list.
 // If found, it extends the timeout with "set". If not found, it adds the IP with "add"
-// and a "wl|<RFC3339>" comment.
-func (c *RouterOSClient) Whitelist(ctx context.Context, ip string) (*WhitelistResult, error) {
+// and a "wl|<nama_hostname_target>" comment.
+func (c *RouterOSClient) Whitelist(ctx context.Context, ip string, hostname ...string) (*WhitelistResult, error) {
 	abuseListName := c.cfg.PortForwardAbuseListName
 	listName := c.cfg.WhitelistListName
 	now := time.Now().In(c.cfg.Location)
-	rfc3339Now := now.Format(time.RFC3339)
-	comment := fmt.Sprintf("wl|%s", rfc3339Now)
 	expiresAt := now.Add(c.cfg.WhitelistDuration)
+
+	// Determine target hostname for comment: wl|<nama_hostname_target>
+	targetHost := ""
+	if len(hostname) > 0 && strings.TrimSpace(hostname[0]) != "" {
+		targetHost = SanitizeHostname(hostname[0])
+	}
+	if targetHost == "" {
+		targetHost = ResolveHostname(ctx, ip)
+	}
+	comment := fmt.Sprintf("wl|%s", targetHost)
 
 	// 1. Check if the target IP exists in "port-forward-abuse" address list. If so, remove it.
 	removedFromAbuse := false
@@ -244,6 +305,7 @@ func (c *RouterOSClient) Whitelist(ctx context.Context, ip string) (*WhitelistRe
 		return &WhitelistResult{
 			Action:           ActionExtended,
 			IP:               ip,
+			Hostname:         targetHost,
 			ExpiresAt:        expiresAt,
 			RemovedFromAbuse: removedFromAbuse,
 		}, nil
@@ -265,6 +327,7 @@ func (c *RouterOSClient) Whitelist(ctx context.Context, ip string) (*WhitelistRe
 	return &WhitelistResult{
 		Action:           ActionAdded,
 		IP:               ip,
+		Hostname:         targetHost,
 		ExpiresAt:        expiresAt,
 		RemovedFromAbuse: removedFromAbuse,
 	}, nil
@@ -303,5 +366,127 @@ func (c *RouterOSClient) Ping(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("mikrotik health ping failed: %w", err)
 	}
+	return nil
+}
+
+// FormatWinboxCIDR appends /32 (for IPv4) or /128 (for IPv6) if the IP does not already contain a CIDR mask.
+func FormatWinboxCIDR(ip string) string {
+	ip = strings.TrimSpace(ip)
+	if strings.Contains(ip, "/") {
+		return ip
+	}
+	if strings.Contains(ip, ":") {
+		return ip + "/128"
+	}
+	return ip + "/32"
+}
+
+// parseAddressList parses a comma-separated list of addresses into a trimmed slice.
+func parseAddressList(raw string) []string {
+	var list []string
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			list = append(list, part)
+		}
+	}
+	return list
+}
+
+// AllowWinbox adds the target IP (as /32 or /128) to the allowed address list of the MikroTik Winbox service.
+// Equivalent to: /ip service set [find name=winbox] address=([get [find name=winbox] address],<target_ip>/32)
+// If the IP is already allowed, this operation is a no-op.
+func (c *RouterOSClient) AllowWinbox(ctx context.Context, ip string) error {
+	reply, err := c.runCommand(ctx, "/ip/service/print", "?name=winbox")
+	if err != nil {
+		return fmt.Errorf("mikrotik query winbox service error: %w", err)
+	}
+	if len(reply.Re) == 0 {
+		return errors.New("winbox service not found")
+	}
+
+	id := reply.Re[0].Map[".id"]
+	currAddr := reply.Re[0].Map["address"]
+	targetCIDR := FormatWinboxCIDR(ip)
+	addresses := parseAddressList(currAddr)
+
+	for _, addr := range addresses {
+		if addr == targetCIDR || addr == ip || strings.TrimSuffix(addr, "/32") == ip || strings.TrimSuffix(addr, "/128") == ip {
+			c.logger.Debug("ip already allowed for winbox service", "ip", ip, "cidr", targetCIDR)
+			return nil
+		}
+	}
+
+	addresses = append(addresses, targetCIDR)
+	newAddr := strings.Join(addresses, ",")
+
+	setArgs := []string{"/ip/service/set"}
+	if id != "" {
+		setArgs = append(setArgs, "=.id="+id)
+	} else {
+		setArgs = append(setArgs, "=numbers=winbox")
+	}
+	setArgs = append(setArgs, "=address="+newAddr)
+
+	if _, err := c.runCommand(ctx, setArgs...); err != nil {
+		return fmt.Errorf("mikrotik set winbox service address error: %w", err)
+	}
+
+	c.logger.Info("added ip to winbox service allowed addresses",
+		"ip", ip,
+		"cidr", targetCIDR,
+		"new_addresses", newAddr,
+	)
+	return nil
+}
+
+// RemoveWinbox removes the target IP from the allowed address list of the MikroTik Winbox service.
+// If the IP is not present in the list, this operation is a no-op.
+func (c *RouterOSClient) RemoveWinbox(ctx context.Context, ip string) error {
+	reply, err := c.runCommand(ctx, "/ip/service/print", "?name=winbox")
+	if err != nil {
+		return fmt.Errorf("mikrotik query winbox service error: %w", err)
+	}
+	if len(reply.Re) == 0 {
+		return nil
+	}
+
+	id := reply.Re[0].Map[".id"]
+	currAddr := reply.Re[0].Map["address"]
+	targetCIDR := FormatWinboxCIDR(ip)
+	addresses := parseAddressList(currAddr)
+
+	var filtered []string
+	changed := false
+	for _, addr := range addresses {
+		if addr == targetCIDR || addr == ip || strings.TrimSuffix(addr, "/32") == ip || strings.TrimSuffix(addr, "/128") == ip {
+			changed = true
+			continue
+		}
+		filtered = append(filtered, addr)
+	}
+
+	if !changed {
+		return nil
+	}
+
+	newAddr := strings.Join(filtered, ",")
+	setArgs := []string{"/ip/service/set"}
+	if id != "" {
+		setArgs = append(setArgs, "=.id="+id)
+	} else {
+		setArgs = append(setArgs, "=numbers=winbox")
+	}
+	setArgs = append(setArgs, "=address="+newAddr)
+
+	if _, err := c.runCommand(ctx, setArgs...); err != nil {
+		return fmt.Errorf("mikrotik remove winbox service address error: %w", err)
+	}
+
+	c.logger.Info("removed ip from winbox service allowed addresses",
+		"ip", ip,
+		"cidr", targetCIDR,
+		"new_addresses", newAddr,
+	)
 	return nil
 }
