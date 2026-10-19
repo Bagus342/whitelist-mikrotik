@@ -62,11 +62,11 @@
           </form>
           {{end}}
 
-          <button id="btn-refresh" class="btn btn-icon btn-outline" title="Refresh Telemetry & Status" aria-label="Refresh Telemetry"
+          <button id="btn-refresh" class="btn btn-icon btn-outline" title="Refresh Status" aria-label="Refresh Status"
                   hx-get="/ui/status"
                   hx-target="#hero-client-card"
                   hx-swap="outerHTML"
-                  hx-on::after-request="htmx.ajax('GET', '/ui/entries', {target: '#entries-tbody', swap: 'innerHTML'}); showToast('Data diperbarui dari MikroTik', 'success');">
+                  hx-on::after-request="showToast('Status diperbarui dari MikroTik', 'success');">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path>
               <path d="M21 3v5h-5"></path>
@@ -77,126 +77,13 @@
       </div>
     </header>
 
-    <!-- HERO SECTION -->
+    <!-- HERO SECTION (Core IP & Hostname Whitelist Tool) -->
     <section class="jt-hero">
       <div class="hero-bg-glow"></div>
       
       <div class="hero-container">
         <!-- Render Hero Client Card Template -->
         {{template "card.html" .}}
-      </div>
-    </section>
-
-    <!-- STATS TELEMETRY SECTION -->
-    <section class="jt-stats-section">
-      <div class="section-container">
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-icon-wrapper cyan-gradient">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              </svg>
-            </div>
-            <div class="stat-content">
-              <span class="stat-number">{{.TotalWhitelisted}}</span>
-              <span class="stat-label">Total IP Ter-Whitelist</span>
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-icon-wrapper blue-gradient">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect width="20" height="8" x="2" y="2" rx="2" ry="2"/>
-                <rect width="20" height="8" x="2" y="14" rx="2" ry="2"/>
-                <line x1="6" x2="6.01" y1="6" y2="6"/>
-                <line x1="6" x2="6.01" y1="18" y2="18"/>
-              </svg>
-            </div>
-            <div class="stat-content">
-              <span class="stat-number font-mono" style="font-size: 1.15rem;">{{.MikrotikAddress}}</span>
-              <span class="stat-label">Alamat RouterOS API</span>
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-icon-wrapper orange-gradient">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <polyline points="12 6 12 12 16 14"/>
-              </svg>
-            </div>
-            <div class="stat-content">
-              <span class="stat-number">{{.WhitelistTTL}}</span>
-              <span class="stat-label">Durasi Masa Berlaku (TTL)</span>
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-icon-wrapper purple-gradient">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                <circle cx="12" cy="7" r="4"/>
-              </svg>
-            </div>
-            <div class="stat-content">
-              <span class="stat-number font-mono" style="font-size: 1.15rem;">{{.ClientIP}}</span>
-              <span class="stat-label">IP Klien Anda</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- DATA TABLE SECTION -->
-    <section class="jt-table-section">
-      <div class="section-container">
-        
-        <div class="table-header-bar">
-          <div>
-            <span class="section-tagline">Firewall Address-List</span>
-            <h2 class="section-heading">Daftar IP Ter-Whitelist</h2>
-          </div>
-
-          <div class="table-controls">
-            <!-- Search Box -->
-            <div class="search-box">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-              </svg>
-              <input type="text" id="table-search" placeholder="Cari IP / Hostname...">
-            </div>
-
-            <!-- Filter Pills -->
-            <div class="filter-pills">
-              <button type="button" class="filter-pill active" data-filter="all">Semua</button>
-              <button type="button" class="filter-pill" data-filter="managed">Managed (wl)</button>
-              <button type="button" class="filter-pill" data-filter="winbox">Winbox</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Table Card Wrapper -->
-        <div class="jt-card-table-wrapper">
-          <table class="jt-data-table">
-            <thead>
-              <tr>
-                <th>IP Address</th>
-                <th>Hostname / Identitas</th>
-                <th>Address List</th>
-                <th>Sisa Timeout</th>
-                <th>Akses Winbox</th>
-                <th style="text-align: right;">Aksi</th>
-              </tr>
-            </thead>
-            <tbody id="entries-tbody"
-                   hx-get="/ui/entries"
-                   hx-trigger="refreshEntries from:body">
-              {{template "entries.html" .}}
-            </tbody>
-          </table>
-        </div>
-
       </div>
     </section>
 
