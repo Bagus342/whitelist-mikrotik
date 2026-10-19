@@ -51,77 +51,172 @@ function initHostnameDetection() {
 }
 
 // ==========================================================================
-// 1b. PROVIDER / ISP DETECTION
+// 1b. PROVIDER / ISP DETECTION (from scan_ip_satu_persatu_mikrotik.sh logic)
 // ==========================================================================
 
-function cleanProviderName(raw) {
-  if (!raw) return '';
-  let str = String(raw).trim();
-  str = str.replace(/^PT\.?\s+/i, '')
-           .replace(/\s+(Tbk|Ltd|LLC|Inc|Corporation|Corp)\.?$/i, '')
-           .trim();
+function evaluateProviderFromIPWhoIs(d) {
+  if (!d || !d.success) return null;
 
-  const lower = str.toLowerCase();
-  if (lower.includes('telkom') || lower.includes('indihome')) {
-    return 'Telkom Indonesia';
+  const c = d.connection || {};
+  const country = d.country || '';
+  const countryCode = (d.country_code || '').toUpperCase();
+  const city = d.city || '';
+  const isp = c.isp || '';
+  const org = c.org || '';
+  const asn = String(c.asn || '');
+  const domain = c.domain || '';
+
+  const allText = `${isp} ${org} ${domain} ${asn}`.toLowerCase();
+  const asnStr = asn.toLowerCase().replace(/^as/, '');
+
+  let providerName = '';
+
+  // 1. Cloudflare (ASN 13335, 139242, 209242 as in scan_ip_satu_persatu_mikrotik.sh)
+  if (allText.includes('cloudflare') || ['13335', '139242', '209242'].includes(asnStr)) {
+    providerName = 'Cloudflare';
   }
-  if (lower.includes('moratelindo') || lower.includes('oxygen')) {
-    return 'Oxygen.id';
+  // 2. Wasabi S3 (ASN 395717 as in scan_ip_satu_persatu_mikrotik.sh)
+  else if (allText.includes('wasabi') || asnStr === '395717') {
+    providerName = 'Wasabi S3';
   }
-  if (lower.includes('biznet')) {
-    return 'Biznet Networks';
+  // 3. Oxygen.id / PT Mora Telematika Indonesia (Moratelindo)
+  else if (allText.includes('oxygen') || allText.includes('moratelindo') || allText.includes('mora telematika')) {
+    providerName = 'Oxygen.id (Moratelindo)';
   }
-  if (lower.includes('link net') || lower.includes('first media')) {
-    return 'First Media';
+  // 4. Telkomsel
+  else if (allText.includes('telkomsel') || allText.includes('telekomunikasi selular')) {
+    providerName = 'Telkomsel';
   }
-  if (lower.includes('myrepublic') || lower.includes('innovate')) {
-    return 'MyRepublic';
+  // 5. Telkom Indonesia / IndiHome
+  else if (allText.includes('telkom') || allText.includes('indihome') || allText.includes('telekomunikasi indonesia')) {
+    providerName = 'Telkom Indonesia (IndiHome)';
   }
-  if (lower.includes('xl axiata') || lower.includes('axis')) {
-    return 'XL Axiata';
+  // 6. Biznet Networks / PT Supra Primatama Nusantara
+  else if (allText.includes('biznet') || allText.includes('supra primatama')) {
+    providerName = 'Biznet Networks';
   }
-  if (lower.includes('indosat') || lower.includes('ooredoo') || lower.includes('hutchison') || lower.includes('tri') || lower.includes('im3')) {
-    return 'Indosat Ooredoo';
+  // 7. First Media / PT Link Net
+  else if (allText.includes('first media') || allText.includes('firstmedia') || allText.includes('link net') || allText.includes('linknet')) {
+    providerName = 'First Media (LinkNet)';
   }
-  if (lower.includes('smartfren')) {
-    return 'Smartfren';
+  // 8. MyRepublic / PT Innovate Mas Indonesia
+  else if (allText.includes('myrepublic') || allText.includes('innovate')) {
+    providerName = 'MyRepublic';
   }
-  if (lower.includes('cbn') || lower.includes('cyberindo')) {
-    return 'CBN Internet';
+  // 9. XL Axiata / Axis
+  else if (allText.includes('xl axiata') || allText.includes('xl.co.id') || allText.includes('axis')) {
+    providerName = 'XL Axiata';
   }
-  if (lower.includes('mnc play') || lower.includes('mnc kabel')) {
-    return 'MNC Play';
+  // 10. Indosat Ooredoo Hutchison (Tri / IM3)
+  else if (allText.includes('indosat') || allText.includes('ooredoo') || allText.includes('hutchison') || allText.includes('tri') || allText.includes('im3')) {
+    providerName = 'Indosat Ooredoo';
   }
-  if (lower.includes('icon+') || lower.includes('icon plus') || lower.includes('pln')) {
-    return 'PLN Icon Plus';
+  // 11. Smartfren
+  else if (allText.includes('smartfren')) {
+    providerName = 'Smartfren';
   }
-  if (lower.includes('lintasarta')) {
-    return 'Lintasarta';
+  // 12. CBN Internet / Cyberindo Aditama
+  else if (allText.includes('cbn') || allText.includes('cyberindo')) {
+    providerName = 'CBN Internet';
   }
-  return str;
+  // 13. MNC Play
+  else if (allText.includes('mnc play') || allText.includes('mnc kabel') || allText.includes('mncplay')) {
+    providerName = 'MNC Play';
+  }
+  // 14. PLN Icon Plus
+  else if (allText.includes('iconplus') || allText.includes('icon+') || allText.includes('indonesia comnets')) {
+    providerName = 'PLN Icon Plus';
+  }
+  // 15. Lintasarta
+  else if (allText.includes('lintasarta')) {
+    providerName = 'Lintasarta';
+  }
+  // 16. Foreign clouds as classified in scan_ip_satu_persatu_mikrotik.sh
+  else {
+    const foreignClouds = [
+      { key: 'amazon', name: 'Amazon AWS' },
+      { key: 'aws', name: 'Amazon AWS' },
+      { key: 'google', name: 'Google Cloud' },
+      { key: 'microsoft', name: 'Microsoft Azure' },
+      { key: 'azure', name: 'Microsoft Azure' },
+      { key: 'alibaba', name: 'Alibaba Cloud' },
+      { key: 'aliyun', name: 'Alibaba Cloud' },
+      { key: 'digitalocean', name: 'DigitalOcean' },
+      { key: 'linode', name: 'Linode / Akamai' },
+      { key: 'vultr', name: 'Vultr' },
+      { key: 'oracle', name: 'Oracle Cloud' },
+      { key: 'hetzner', name: 'Hetzner' },
+      { key: 'ovh', name: 'OVHcloud' },
+      { key: 'leaseweb', name: 'Leaseweb' },
+      { key: 'datacamp', name: 'Datacamp' }
+    ];
+
+    const matchedCloud = foreignClouds.find(fc => allText.includes(fc.key));
+    if (matchedCloud) {
+      providerName = (countryCode === 'ID' || country.toLowerCase() === 'indonesia')
+        ? `${matchedCloud.name} (ID)`
+        : matchedCloud.name;
+    } else {
+      let clean = (isp && isp !== '?') ? isp : org;
+      clean = clean.replace(/^PT\.?\s+/i, '')
+                   .replace(/\s+(Tbk|Ltd|LLC|Inc|Corporation|Corp)\.?$/i, '')
+                   .trim();
+      providerName = clean || 'Publik / Eksternal';
+    }
+  }
+
+  const details = [];
+  if (asn && asn !== '?') details.push(`ASN: AS${asn.replace(/^AS/i, '')}`);
+  if (city && city !== '?') details.push(`Kota: ${city}`);
+  if (countryCode) details.push(`Negara: ${countryCode}`);
+
+  return {
+    provider: providerName,
+    ip: d.ip,
+    tooltip: details.length > 0 ? `${providerName} (${details.join(' • ')})` : providerName
+  };
 }
 
 async function initProviderDetection() {
   const providerText = document.getElementById('client-provider-text');
+  const providerBadge = document.getElementById('client-provider-badge');
+  const ipInput = document.getElementById('input-ip');
   if (!providerText) return;
 
-  const currentVal = providerText.textContent.trim();
-  const isGeneric = !currentVal ||
-                    currentVal === 'Deteksi Provider...' ||
-                    currentVal === 'Publik / Eksternal' ||
-                    currentVal === 'Tidak Diketahui';
+  const currentIP = ipInput ? ipInput.value.trim() : '';
+  const isPrivateOrLoopback =
+    !currentIP ||
+    currentIP === '127.0.0.1' ||
+    currentIP === '::1' ||
+    currentIP.startsWith('10.') ||
+    currentIP.startsWith('192.168.') ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(currentIP);
 
-  const saved = localStorage.getItem('jti_wl_provider');
-  if (saved && isGeneric) {
-    providerText.textContent = saved;
+  const queryUrl = isPrivateOrLoopback
+    ? 'https://ipwho.is/'
+    : `https://ipwho.is/${encodeURIComponent(currentIP)}`;
+
+  // Load cached provider if present
+  const cacheKey = 'jti_wl_provider_' + (currentIP || 'self');
+  const cached = localStorage.getItem(cacheKey);
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached);
+      providerText.textContent = parsed.provider;
+      if (providerBadge && parsed.tooltip) {
+        providerBadge.setAttribute('title', parsed.tooltip);
+      }
+    } catch {
+      providerText.textContent = cached;
+    }
   }
 
-  // Attempt client-side public ISP lookup if online
+  // Attempt live lookup via ipwho.is (from scan_ip_satu_persatu_mikrotik.sh)
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-    const res = await fetch('https://ipwho.is/', {
+    const res = await fetch(queryUrl, {
       signal: controller.signal,
       cache: 'default',
     });
@@ -129,34 +224,17 @@ async function initProviderDetection() {
 
     if (res.ok) {
       const data = await res.json();
-      const rawIsp = data.connection?.isp || data.connection?.org || data.isp || data.org || '';
-      const cleaned = cleanProviderName(rawIsp);
-      if (cleaned) {
-        localStorage.setItem('jti_wl_provider', cleaned);
-        providerText.textContent = cleaned;
+      const evaluated = evaluateProviderFromIPWhoIs(data);
+      if (evaluated && evaluated.provider) {
+        localStorage.setItem(cacheKey, JSON.stringify(evaluated));
+        providerText.textContent = evaluated.provider;
+        if (providerBadge) {
+          providerBadge.setAttribute('title', evaluated.tooltip);
+        }
       }
     }
   } catch {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2500);
-      const res2 = await fetch('https://ipapi.co/json/', {
-        signal: controller.signal,
-        cache: 'default',
-      });
-      clearTimeout(timeoutId);
-      if (res2.ok) {
-        const data2 = await res2.json();
-        const rawIsp2 = data2.org || data2.asn || '';
-        const cleaned2 = cleanProviderName(rawIsp2);
-        if (cleaned2) {
-          localStorage.setItem('jti_wl_provider', cleaned2);
-          providerText.textContent = cleaned2;
-        }
-      }
-    } catch {
-      // Offline / intranet: retain server detected or cached value
-    }
+    // Offline / intranet fallback
   }
 }
 

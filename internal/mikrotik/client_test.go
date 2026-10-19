@@ -380,3 +380,100 @@ func TestMockClient_GetStatus_IncludesISP(t *testing.T) {
 		t.Errorf("expected ISP 'Jaringan Lokal (LAN)', got %q", status.ISP)
 	}
 }
+
+func TestFormatISPFromGeoIP(t *testing.T) {
+	tests := []struct {
+		name        string
+		isp         string
+		org         string
+		domain      string
+		asn         string
+		country     string
+		countryCode string
+		city        string
+		expected    string
+	}{
+		{
+			name:        "Cloudflare ASN",
+			isp:         "Cloudflare, Inc.",
+			org:         "Cloudflare, Inc.",
+			asn:         "13335",
+			countryCode: "US",
+			expected:    "Cloudflare",
+		},
+		{
+			name:        "Wasabi S3 ASN",
+			isp:         "Wasabi Systems",
+			org:         "Wasabi Systems",
+			asn:         "395717",
+			countryCode: "US",
+			expected:    "Wasabi S3",
+		},
+		{
+			name:        "Moratelindo Oxygen",
+			isp:         "PT Mora Telematika Indonesia",
+			org:         "PT Mora Telematika Indonesia",
+			domain:      "moratelindo.co.id",
+			asn:         "23947",
+			countryCode: "ID",
+			city:        "Jakarta",
+			expected:    "Oxygen.id (Moratelindo)",
+		},
+		{
+			name:        "Telkom Indonesia",
+			isp:         "Telkom Indonesia",
+			org:         "PT Telkom Indonesia",
+			domain:      "telkom.co.id",
+			asn:         "17974",
+			countryCode: "ID",
+			city:        "Jakarta",
+			expected:    "Telkom Indonesia (IndiHome)",
+		},
+		{
+			name:        "Telkomsel",
+			isp:         "PT Telekomunikasi Selular",
+			org:         "Telkomsel",
+			domain:      "telkomsel.com",
+			asn:         "24203",
+			countryCode: "ID",
+			expected:    "Telkomsel",
+		},
+		{
+			name:        "Biznet",
+			isp:         "Biznet Networks",
+			org:         "PT Supra Primatama Nusantara",
+			domain:      "biznetnetworks.com",
+			asn:         "17451",
+			countryCode: "ID",
+			expected:    "Biznet Networks",
+		},
+		{
+			name:        "First Media",
+			isp:         "First Media",
+			org:         "PT Link Net Tbk",
+			domain:      "firstmedia.com",
+			asn:         "23700",
+			countryCode: "ID",
+			expected:    "First Media (LinkNet)",
+		},
+		{
+			name:        "Foreign Cloud in Indonesia",
+			isp:         "Google LLC",
+			org:         "Google Cloud Platform",
+			domain:      "google.com",
+			asn:         "15169",
+			countryCode: "ID",
+			country:     "Indonesia",
+			expected:    "Google Cloud (ID)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatISPFromGeoIP(tt.isp, tt.org, tt.domain, tt.asn, tt.country, tt.countryCode, tt.city)
+			if got != tt.expected {
+				t.Errorf("FormatISPFromGeoIP() = %q, expected %q", got, tt.expected)
+			}
+		})
+	}
+}

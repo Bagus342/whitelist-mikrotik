@@ -2,10 +2,13 @@ package mikrotik
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -294,9 +297,195 @@ func ResolveHostname(ctx context.Context, ip string) string {
 	return ip
 }
 
+// FormatISPFromGeoIP maps raw GeoIP attributes from ipwho.is (as used in scan_ip_satu_persatu_mikrotik.sh)
+// to a clean, user-friendly provider name.
+func FormatISPFromGeoIP(isp, org, domain, asn, country, countryCode, city string) string {
+	allText := strings.ToLower(fmt.Sprintf("%s %s %s %s", isp, org, domain, asn))
+	asnStr := strings.ToLower(strings.TrimPrefix(asn, "as"))
+
+	// 1. Cloudflare (ASN 13335, 139242, 209242)
+	if strings.Contains(allText, "cloudflare") || asnStr == "13335" || asnStr == "139242" || asnStr == "209242" {
+		return "Cloudflare"
+	}
+
+	// 2. Wasabi S3 (ASN 395717)
+	if strings.Contains(allText, "wasabi") || asnStr == "395717" {
+		return "Wasabi S3"
+	}
+
+	// 3. Oxygen.id / PT Mora Telematika Indonesia (Moratelindo)
+	if strings.Contains(allText, "oxygen") || strings.Contains(allText, "moratelindo") || strings.Contains(allText, "mora telematika") {
+		return "Oxygen.id (Moratelindo)"
+	}
+
+	// 4. Telkomsel
+	if strings.Contains(allText, "telkomsel") || strings.Contains(allText, "telekomunikasi selular") {
+		return "Telkomsel"
+	}
+
+	// 5. Telkom Indonesia / IndiHome
+	if strings.Contains(allText, "telkom") || strings.Contains(allText, "indihome") || strings.Contains(allText, "telekomunikasi indonesia") {
+		return "Telkom Indonesia (IndiHome)"
+	}
+
+	// 6. Biznet Networks / PT Supra Primatama Nusantara
+	if strings.Contains(allText, "biznet") || strings.Contains(allText, "supra primatama") {
+		return "Biznet Networks"
+	}
+
+	// 7. First Media / PT Link Net
+	if strings.Contains(allText, "first media") || strings.Contains(allText, "firstmedia") || strings.Contains(allText, "link net") || strings.Contains(allText, "linknet") {
+		return "First Media (LinkNet)"
+	}
+
+	// 8. MyRepublic / PT Innovate Mas Indonesia
+	if strings.Contains(allText, "myrepublic") || strings.Contains(allText, "innovate") {
+		return "MyRepublic"
+	}
+
+	// 9. XL Axiata / Axis
+	if strings.Contains(allText, "xl axiata") || strings.Contains(allText, "xl.co.id") || strings.Contains(allText, "axis") {
+		return "XL Axiata"
+	}
+
+	// 10. Indosat Ooredoo Hutchison (Tri / IM3)
+	if strings.Contains(allText, "indosat") || strings.Contains(allText, "ooredoo") || strings.Contains(allText, "hutchison") || strings.Contains(allText, "im3") || strings.Contains(allText, "tri") {
+		return "Indosat Ooredoo"
+	}
+
+	// 11. Smartfren
+	if strings.Contains(allText, "smartfren") {
+		return "Smartfren"
+	}
+
+	// 12. CBN / Cyberindo Aditama
+	if strings.Contains(allText, "cbn") || strings.Contains(allText, "cyberindo") {
+		return "CBN Internet"
+	}
+
+	// 13. MNC Play
+	if strings.Contains(allText, "mnc play") || strings.Contains(allText, "mnc kabel") || strings.Contains(allText, "mncplay") {
+		return "MNC Play"
+	}
+
+	// 14. PLN Icon Plus
+	if strings.Contains(allText, "iconplus") || strings.Contains(allText, "icon+") || strings.Contains(allText, "indonesia comnets") {
+		return "PLN Icon Plus"
+	}
+
+	// 15. Lintasarta
+	if strings.Contains(allText, "lintasarta") {
+		return "Lintasarta"
+	}
+
+	// 16. Foreign clouds as classified in scan_ip_satu_persatu_mikrotik.sh
+	foreignClouds := []struct{ key, name string }{
+		{"google", "Google Cloud"},
+		{"aws", "Amazon AWS"},
+		{"amazon", "Amazon AWS"},
+		{"azure", "Microsoft Azure"},
+		{"microsoft", "Microsoft Azure"},
+		{"alibaba", "Alibaba Cloud"},
+		{"aliyun", "Alibaba Cloud"},
+		{"digitalocean", "DigitalOcean"},
+		{"linode", "Linode / Akamai"},
+		{"vultr", "Vultr"},
+		{"oracle", "Oracle Cloud"},
+		{"hetzner", "Hetzner"},
+		{"ovh", "OVHcloud"},
+		{"leaseweb", "Leaseweb"},
+		{"datacamp", "Datacamp"},
+	}
+	for _, fc := range foreignClouds {
+		if strings.Contains(allText, fc.key) {
+			if strings.ToUpper(countryCode) == "ID" || strings.ToLower(country) == "indonesia" {
+				return fc.name + " (ID)"
+			}
+			return fc.name
+		}
+	}
+
+	// Clean up raw ISP / Org name
+	raw := isp
+	if raw == "" || raw == "?" {
+		raw = org
+	}
+	if raw != "" && raw != "?" {
+		clean := strings.TrimSpace(raw)
+		clean = strings.TrimPrefix(clean, "PT. ")
+		clean = strings.TrimPrefix(clean, "PT ")
+		clean = strings.TrimSuffix(clean, " Tbk")
+		clean = strings.TrimSuffix(clean, " Tbk.")
+		if clean != "" {
+			return clean
+		}
+	}
+
+	return ""
+}
+
+// QueryIPWhoIs queries the https://ipwho.is/<ip> API as used in scan_ip_satu_persatu_mikrotik.sh.
+// It returns the detected provider name and success boolean.
+func QueryIPWhoIs(ctx context.Context, ipStr string) (string, bool) {
+	lookupCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	reqURL := fmt.Sprintf("https://ipwho.is/%s", url.PathEscape(ipStr))
+	req, err := http.NewRequestWithContext(lookupCtx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return "", false
+	}
+	req.Header.Set("User-Agent", "JTI-Mikrotik-Whitelist/1.0 (scan_ip_satu_persatu_mikrotik)")
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+
+	var d struct {
+		Success     bool   `json:"success"`
+		Country     string `json:"country"`
+		CountryCode string `json:"country_code"`
+		City        string `json:"city"`
+		Connection  struct {
+			ASN    any    `json:"asn"`
+			Org    string `json:"org"`
+			ISP    string `json:"isp"`
+			Domain string `json:"domain"`
+		} `json:"connection"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil || !d.Success {
+		return "", false
+	}
+
+	asnStr := ""
+	if d.Connection.ASN != nil {
+		asnStr = fmt.Sprintf("%v", d.Connection.ASN)
+	}
+
+	provider := FormatISPFromGeoIP(
+		d.Connection.ISP,
+		d.Connection.Org,
+		d.Connection.Domain,
+		asnStr,
+		d.Country,
+		d.CountryCode,
+		d.City,
+	)
+
+	return provider, provider != ""
+}
+
 // DetectISP attempts to identify the provider / network of the given IP address.
-// It checks for private/local IP ranges first, then performs PTR reverse DNS analysis
-// for well-known Indonesian and global ISPs.
+// It checks for private/local IP ranges first, then queries ipwho.is (as used in
+// scan_ip_satu_persatu_mikrotik.sh), and falls back to PTR reverse DNS analysis.
 func DetectISP(ctx context.Context, ipStr string) string {
 	ip := net.ParseIP(strings.TrimSpace(ipStr))
 	if ip == nil {
@@ -308,7 +497,12 @@ func DetectISP(ctx context.Context, ipStr string) string {
 		return "Jaringan Lokal (LAN)"
 	}
 
-	// 2. Perform Reverse DNS lookup with a fast timeout
+	// 2. Query ipwho.is API (from scan_ip_satu_persatu_mikrotik.sh)
+	if isp, ok := QueryIPWhoIs(ctx, ip.String()); ok && isp != "" {
+		return isp
+	}
+
+	// 3. Perform Reverse DNS lookup with a fast timeout (fallback)
 	lookupCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	defer cancel()
 
@@ -317,23 +511,25 @@ func DetectISP(ctx context.Context, ipStr string) string {
 		for _, name := range names {
 			lower := strings.ToLower(name)
 			switch {
-			case strings.Contains(lower, "telkom") || strings.Contains(lower, "indihome") || strings.Contains(lower, "telkomsel"):
-				return "Telkom Indonesia"
-			case strings.Contains(lower, "oxygen") || strings.Contains(lower, "moratelindo"):
-				return "Oxygen.id"
-			case strings.Contains(lower, "biznet"):
+			case strings.Contains(lower, "telkomsel") || strings.Contains(lower, "telekomunikasi selular"):
+				return "Telkomsel"
+			case strings.Contains(lower, "telkom") || strings.Contains(lower, "indihome") || strings.Contains(lower, "telekomunikasi indonesia"):
+				return "Telkom Indonesia (IndiHome)"
+			case strings.Contains(lower, "oxygen") || strings.Contains(lower, "moratelindo") || strings.Contains(lower, "mora telematika"):
+				return "Oxygen.id (Moratelindo)"
+			case strings.Contains(lower, "biznet") || strings.Contains(lower, "supra primatama"):
 				return "Biznet Networks"
-			case strings.Contains(lower, "firstmedia") || strings.Contains(lower, "linknet"):
-				return "First Media"
+			case strings.Contains(lower, "firstmedia") || strings.Contains(lower, "linknet") || strings.Contains(lower, "link net"):
+				return "First Media (LinkNet)"
 			case strings.Contains(lower, "myrepublic") || strings.Contains(lower, "innovate"):
 				return "MyRepublic"
 			case strings.Contains(lower, "xl.co.id") || strings.Contains(lower, "xl.net.id") || strings.Contains(lower, "axis"):
 				return "XL Axiata"
-			case strings.Contains(lower, "indosat") || strings.Contains(lower, "isat") || strings.Contains(lower, "im3"):
+			case strings.Contains(lower, "indosat") || strings.Contains(lower, "isat") || strings.Contains(lower, "im3") || strings.Contains(lower, "tri"):
 				return "Indosat Ooredoo"
 			case strings.Contains(lower, "smartfren"):
 				return "Smartfren"
-			case strings.Contains(lower, "cbn"):
+			case strings.Contains(lower, "cbn") || strings.Contains(lower, "cyberindo"):
 				return "CBN Internet"
 			case strings.Contains(lower, "mncplay") || strings.Contains(lower, "mnc"):
 				return "MNC Play"
@@ -341,10 +537,12 @@ func DetectISP(ctx context.Context, ipStr string) string {
 				return "PLN Icon Plus"
 			case strings.Contains(lower, "lintasarta"):
 				return "Lintasarta"
+			case strings.Contains(lower, "wasabi"):
+				return "Wasabi S3"
 			case strings.Contains(lower, "cloudflare"):
 				return "Cloudflare"
 			case strings.Contains(lower, "google"):
-				return "Google"
+				return "Google Cloud"
 			case strings.Contains(lower, "amazonaws") || strings.Contains(lower, "aws"):
 				return "Amazon AWS"
 			case strings.Contains(lower, "digitalocean"):
