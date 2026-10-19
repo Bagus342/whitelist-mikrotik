@@ -44,6 +44,7 @@ type WhitelistResult struct {
 type StatusResult struct {
 	ClientIP         string        `json:"client_ip"`
 	Hostname         string        `json:"hostname"`
+	ISP              string        `json:"isp,omitempty"`
 	IsWhitelisted    bool          `json:"is_whitelisted"`
 	Comment          string        `json:"comment,omitempty"`
 	Timeout          string        `json:"timeout,omitempty"`
@@ -291,6 +292,77 @@ func ResolveHostname(ctx context.Context, ip string) string {
 	}
 
 	return ip
+}
+
+// DetectISP attempts to identify the provider / network of the given IP address.
+// It checks for private/local IP ranges first, then performs PTR reverse DNS analysis
+// for well-known Indonesian and global ISPs.
+func DetectISP(ctx context.Context, ipStr string) string {
+	ip := net.ParseIP(strings.TrimSpace(ipStr))
+	if ip == nil {
+		return "Tidak Diketahui"
+	}
+
+	// 1. Check local/private/loopback ranges
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		return "Jaringan Lokal (LAN)"
+	}
+
+	// 2. Perform Reverse DNS lookup with a fast timeout
+	lookupCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+
+	names, err := net.DefaultResolver.LookupAddr(lookupCtx, ip.String())
+	if err == nil && len(names) > 0 {
+		for _, name := range names {
+			lower := strings.ToLower(name)
+			switch {
+			case strings.Contains(lower, "telkom") || strings.Contains(lower, "indihome") || strings.Contains(lower, "telkomsel"):
+				return "Telkom Indonesia"
+			case strings.Contains(lower, "oxygen") || strings.Contains(lower, "moratelindo"):
+				return "Oxygen.id"
+			case strings.Contains(lower, "biznet"):
+				return "Biznet Networks"
+			case strings.Contains(lower, "firstmedia") || strings.Contains(lower, "linknet"):
+				return "First Media"
+			case strings.Contains(lower, "myrepublic") || strings.Contains(lower, "innovate"):
+				return "MyRepublic"
+			case strings.Contains(lower, "xl.co.id") || strings.Contains(lower, "xl.net.id") || strings.Contains(lower, "axis"):
+				return "XL Axiata"
+			case strings.Contains(lower, "indosat") || strings.Contains(lower, "isat") || strings.Contains(lower, "im3"):
+				return "Indosat Ooredoo"
+			case strings.Contains(lower, "smartfren"):
+				return "Smartfren"
+			case strings.Contains(lower, "cbn"):
+				return "CBN Internet"
+			case strings.Contains(lower, "mncplay") || strings.Contains(lower, "mnc"):
+				return "MNC Play"
+			case strings.Contains(lower, "iconplus") || strings.Contains(lower, "icon+"):
+				return "PLN Icon Plus"
+			case strings.Contains(lower, "lintasarta"):
+				return "Lintasarta"
+			case strings.Contains(lower, "cloudflare"):
+				return "Cloudflare"
+			case strings.Contains(lower, "google"):
+				return "Google"
+			case strings.Contains(lower, "amazonaws") || strings.Contains(lower, "aws"):
+				return "Amazon AWS"
+			case strings.Contains(lower, "digitalocean"):
+				return "DigitalOcean"
+			case strings.Contains(lower, "microsoft") || strings.Contains(lower, "azure"):
+				return "Microsoft Azure"
+			}
+		}
+
+		first := strings.TrimSuffix(names[0], ".")
+		parts := strings.Split(first, ".")
+		if len(parts) >= 2 {
+			domain := parts[len(parts)-2] + "." + parts[len(parts)-1]
+			return strings.ToUpper(parts[len(parts)-2]) + " (" + domain + ")"
+		}
+	}
+
+	return "Publik / Eksternal"
 }
 
 // Whitelist checks if the IP is present in the abuse list (e.g. "port-forward-abuse").
@@ -648,7 +720,7 @@ func (c *RouterOSClient) GetStatus(ctx context.Context, ip string) (*StatusResul
 	allEntries, _ := c.ListEntries(ctx)
 	totalWhitelisted := len(allEntries)
 
-	// 5. Determine hostname
+	// 5. Determine hostname and ISP
 	hostname := ""
 	if isWhitelisted && strings.HasPrefix(comment, "wl|") {
 		hostname = strings.TrimPrefix(comment, "wl|")
@@ -656,11 +728,13 @@ func (c *RouterOSClient) GetStatus(ctx context.Context, ip string) (*StatusResul
 		hostname = ResolveHostname(ctx, ip)
 	}
 
+	isp := DetectISP(ctx, ip)
 	routerAddr := fmt.Sprintf("%s:%d", c.cfg.MikrotikHost, c.cfg.MikrotikPort)
 
 	return &StatusResult{
 		ClientIP:         ip,
 		Hostname:         hostname,
+		ISP:              isp,
 		IsWhitelisted:    isWhitelisted,
 		Comment:          comment,
 		Timeout:          timeout,

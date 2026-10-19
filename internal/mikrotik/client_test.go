@@ -335,3 +335,48 @@ func TestMockClient_AllowWinbox_And_RemoveWinbox(t *testing.T) {
 		t.Fatalf("unexpected error on RemoveWinbox nonexistent: %v", err)
 	}
 }
+
+func TestDetectISP(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name     string
+		ip       string
+		expected string
+	}{
+		{"empty IP", "", "Tidak Diketahui"},
+		{"malformed IP", "invalid-ip-string", "Tidak Diketahui"},
+		{"loopback IPv4", "127.0.0.1", "Jaringan Lokal (LAN)"},
+		{"private 192.168", "192.168.1.50", "Jaringan Lokal (LAN)"},
+		{"private 10.x", "10.0.0.1", "Jaringan Lokal (LAN)"},
+		{"loopback IPv6", "::1", "Jaringan Lokal (LAN)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DetectISP(ctx, tt.ip)
+			if got != tt.expected {
+				t.Errorf("DetectISP(%q) = %q, expected %q", tt.ip, got, tt.expected)
+			}
+		})
+	}
+
+	// For documentation public IP TEST-NET, it should return a non-empty string without error
+	gotPublic := DetectISP(ctx, "203.0.113.10")
+	if gotPublic == "" {
+		t.Errorf("DetectISP public returned empty string")
+	}
+}
+
+func TestMockClient_GetStatus_IncludesISP(t *testing.T) {
+	mock := NewMockClient()
+	ctx := context.Background()
+
+	status, err := mock.GetStatus(ctx, "192.168.88.25")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status.ISP != "Jaringan Lokal (LAN)" {
+		t.Errorf("expected ISP 'Jaringan Lokal (LAN)', got %q", status.ISP)
+	}
+}

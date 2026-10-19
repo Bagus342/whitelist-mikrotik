@@ -84,6 +84,9 @@ func (h *Handler) getStatusOrFallback(r *http.Request, targetIP string) *mikroti
 			Entries:          []mikrotik.EntryResult{},
 		}
 	}
+	if status.ISP == "" {
+		status.ISP = mikrotik.DetectISP(ctx, targetIP)
+	}
 	if sess := GetSession(ctx); sess != nil {
 		status.Username = sess.Username
 		status.CSRFToken = sess.CSRFToken

@@ -274,6 +274,7 @@ func (m *MockClient) GetStatus(ctx context.Context, ip string) (*StatusResult, e
 	return &StatusResult{
 		ClientIP:         ip,
 		Hostname:         hostname,
+		ISP:              DetectISP(ctx, ip),
 		IsWhitelisted:    isWhitelisted,
 		Comment:          comment,
 		Timeout:          timeout,

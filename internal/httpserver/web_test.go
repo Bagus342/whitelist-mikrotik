@@ -77,6 +77,12 @@ func TestWebUI_IndexDashboard(t *testing.T) {
 	if !strings.Contains(body, "htmx.min.js") {
 		t.Errorf("expected body to include htmx script")
 	}
+	if !strings.Contains(body, "badge-provider") {
+		t.Errorf("expected body to include badge-provider")
+	}
+	if !strings.Contains(body, "client-provider-text") {
+		t.Errorf("expected body to include client-provider-text")
+	}
 	if !strings.Contains(body, "switching-modal-overlay") {
 		t.Errorf("expected body to include switching overlay modal")
 	}
@@ -227,6 +233,9 @@ func TestWebUI_APIStatusAndEntries(t *testing.T) {
 	}
 	if status.ClientIP != testIP || !status.IsWhitelisted {
 		t.Errorf("unexpected status result: %+v", status)
+	}
+	if status.ISP == "" {
+		t.Errorf("expected status.ISP to be populated, got empty")
 	}
 
 	// 2. GET /api/entries

@@ -279,6 +279,8 @@ body {
   border-radius: var(--radius-xl);
   padding: 28px;
   box-shadow: var(--shadow-hero-card);
+  max-width: 680px;
+  margin: 0 auto;
 }
 
 .client-info-row {
@@ -302,7 +304,8 @@ body {
 .ip-group {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .ip-address {
@@ -320,6 +323,25 @@ body {
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-muted);
+}
+
+.badge-provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #15803d;
+  box-shadow: 0 1px 2px rgba(22, 101, 52, 0.05);
+}
+
+.badge-provider svg {
+  flex-shrink: 0;
+  color: #16a34a;
 }
 
 .isp-pill {

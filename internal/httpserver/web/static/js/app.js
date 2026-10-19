@@ -5,6 +5,7 @@
 
 document.addEventListener('DOMContentLoaded', () => {
   initHostnameDetection();
+  initProviderDetection();
   initPublicIPDetection();
   initHTMXEvents();
   initTableSearch();
@@ -46,6 +47,116 @@ function initHostnameDetection() {
         if (hostnameBadge) hostnameBadge.textContent = val;
       }
     });
+  }
+}
+
+// ==========================================================================
+// 1b. PROVIDER / ISP DETECTION
+// ==========================================================================
+
+function cleanProviderName(raw) {
+  if (!raw) return '';
+  let str = String(raw).trim();
+  str = str.replace(/^PT\.?\s+/i, '')
+           .replace(/\s+(Tbk|Ltd|LLC|Inc|Corporation|Corp)\.?$/i, '')
+           .trim();
+
+  const lower = str.toLowerCase();
+  if (lower.includes('telkom') || lower.includes('indihome')) {
+    return 'Telkom Indonesia';
+  }
+  if (lower.includes('moratelindo') || lower.includes('oxygen')) {
+    return 'Oxygen.id';
+  }
+  if (lower.includes('biznet')) {
+    return 'Biznet Networks';
+  }
+  if (lower.includes('link net') || lower.includes('first media')) {
+    return 'First Media';
+  }
+  if (lower.includes('myrepublic') || lower.includes('innovate')) {
+    return 'MyRepublic';
+  }
+  if (lower.includes('xl axiata') || lower.includes('axis')) {
+    return 'XL Axiata';
+  }
+  if (lower.includes('indosat') || lower.includes('ooredoo') || lower.includes('hutchison') || lower.includes('tri') || lower.includes('im3')) {
+    return 'Indosat Ooredoo';
+  }
+  if (lower.includes('smartfren')) {
+    return 'Smartfren';
+  }
+  if (lower.includes('cbn') || lower.includes('cyberindo')) {
+    return 'CBN Internet';
+  }
+  if (lower.includes('mnc play') || lower.includes('mnc kabel')) {
+    return 'MNC Play';
+  }
+  if (lower.includes('icon+') || lower.includes('icon plus') || lower.includes('pln')) {
+    return 'PLN Icon Plus';
+  }
+  if (lower.includes('lintasarta')) {
+    return 'Lintasarta';
+  }
+  return str;
+}
+
+async function initProviderDetection() {
+  const providerText = document.getElementById('client-provider-text');
+  if (!providerText) return;
+
+  const currentVal = providerText.textContent.trim();
+  const isGeneric = !currentVal ||
+                    currentVal === 'Deteksi Provider...' ||
+                    currentVal === 'Publik / Eksternal' ||
+                    currentVal === 'Tidak Diketahui';
+
+  const saved = localStorage.getItem('jti_wl_provider');
+  if (saved && isGeneric) {
+    providerText.textContent = saved;
+  }
+
+  // Attempt client-side public ISP lookup if online
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+    const res = await fetch('https://ipwho.is/', {
+      signal: controller.signal,
+      cache: 'default',
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = await res.json();
+      const rawIsp = data.connection?.isp || data.connection?.org || data.isp || data.org || '';
+      const cleaned = cleanProviderName(rawIsp);
+      if (cleaned) {
+        localStorage.setItem('jti_wl_provider', cleaned);
+        providerText.textContent = cleaned;
+      }
+    }
+  } catch {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const res2 = await fetch('https://ipapi.co/json/', {
+        signal: controller.signal,
+        cache: 'default',
+      });
+      clearTimeout(timeoutId);
+      if (res2.ok) {
+        const data2 = await res2.json();
+        const rawIsp2 = data2.org || data2.asn || '';
+        const cleaned2 = cleanProviderName(rawIsp2);
+        if (cleaned2) {
+          localStorage.setItem('jti_wl_provider', cleaned2);
+          providerText.textContent = cleaned2;
+        }
+      }
+    } catch {
+      // Offline / intranet: retain server detected or cached value
+    }
   }
 }
 
@@ -136,8 +247,9 @@ function initHTMXEvents() {
     // Hide overlay after a minimum smooth transition of 600ms
     setTimeout(hideSwitchingOverlay, 600);
 
-    // Re-initialize hostname and inputs if hero card was swapped
+    // Re-initialize hostname, provider, and inputs if hero card was swapped
     initHostnameDetection();
+    initProviderDetection();
 
     // Check for HX-Trigger toast header
     const hxTrigger = evt.detail.xhr.getResponseHeader('HX-Trigger');
