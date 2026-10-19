@@ -131,51 +131,63 @@
       <span class="status-ip-pill" title="IP Target yang diperiksa">IP: {{.ClientIP}}</span>
     </div>
 
-    <div class="status-list-grid">
+    <div class="address-cards-grid status-list-grid">
       <!-- 1. remote-whitelist (White List) -->
-      <div class="status-list-item {{if .IsWhitelisted}}active-item{{else}}inactive-item{{end}}">
-        <div class="status-item-left">
-          <span class="status-indicator-dot {{if .IsWhitelisted}}dot-active{{else}}dot-inactive{{end}}"></span>
-          <div class="status-item-details">
-            <div class="status-item-heading">
-              <span class="status-list-title">{{if .WhitelistListName}}{{.WhitelistListName}}{{else}}remote-whitelist{{end}}</span>
-              <span class="status-badge-pill {{if .IsWhitelisted}}badge-pill-green{{else}}badge-pill-gray{{end}}">
-                {{if .IsWhitelisted}}TERDAFTAR (WHITELIST){{else}}TIDAK TERDAFTAR{{end}}
-              </span>
-            </div>
-            <p class="status-item-sub">
-              {{if .IsWhitelisted}}
-                Izin akses firewall aktif.
-                {{if .Timeout}}<span class="status-sub-highlight">Sisa Waktu: <strong>{{.Timeout}}</strong></span>{{end}}
-                {{if .Comment}}<span class="status-sub-highlight">Komentar: <code>{{.Comment}}</code></span>{{end}}
-              {{else}}
-                IP belum terdaftar di whitelist akses remote MikroTik.
-              {{end}}
-            </p>
+      <div class="addr-card status-list-item {{if .IsWhitelisted}}card-active active-item{{else}}card-inactive inactive-item{{end}}">
+        <div class="addr-card-header">
+          <div class="addr-title-group">
+            <span class="addr-status-dot status-indicator-dot {{if .IsWhitelisted}}dot-active{{else}}dot-inactive{{end}}"></span>
+            <span class="addr-list-title status-list-title">{{if .WhitelistListName}}{{.WhitelistListName}}{{else}}remote-whitelist{{end}}</span>
+          </div>
+          <span class="addr-pill-badge status-badge-pill {{if .IsWhitelisted}}pill-green badge-pill-green{{else}}pill-gray badge-pill-gray{{end}}">
+            {{if .IsWhitelisted}}TERDAFTAR (WHITELIST){{else}}TIDAK TERDAFTAR{{end}}
+          </span>
+        </div>
+
+        <div class="addr-card-rows">
+          <div class="addr-row">
+            <span class="row-label">Status Akses</span>
+            <span class="row-val {{if .IsWhitelisted}}val-green{{end}}">
+              {{if .IsWhitelisted}}Aktif Diizinkan{{else}}Belum Terdaftar{{end}}
+            </span>
+          </div>
+          <div class="addr-row">
+            <span class="row-label">Sisa Waktu</span>
+            <span class="row-val mono">{{if and .IsWhitelisted .Timeout}}{{.Timeout}}{{else}}-{{end}}</span>
+          </div>
+          <div class="addr-row">
+            <span class="row-label">Komentar</span>
+            <span class="row-val mono">{{if and .IsWhitelisted .Comment}}{{.Comment}}{{else}}-{{end}}</span>
           </div>
         </div>
       </div>
 
       <!-- 2. port-forward-abuse (Abuse List) -->
-      <div class="status-list-item {{if .IsInAbuseList}}abuse-item{{else}}clean-item{{end}}">
-        <div class="status-item-left">
-          <span class="status-indicator-dot {{if .IsInAbuseList}}dot-danger{{else}}dot-active{{end}}"></span>
-          <div class="status-item-details">
-            <div class="status-item-heading">
-              <span class="status-list-title">{{if .AbuseListName}}{{.AbuseListName}}{{else}}port-forward-abuse{{end}}</span>
-              <span class="status-badge-pill {{if .IsInAbuseList}}badge-pill-red{{else}}badge-pill-clean{{end}}">
-                {{if .IsInAbuseList}}TERDETEKSI ABUSE{{else}}BERSIH (NORMAL){{end}}
-              </span>
-            </div>
-            <p class="status-item-sub">
-              {{if .IsInAbuseList}}
-                <strong style="color: var(--danger-color);">Terdeteksi Abuse:</strong> IP ini masuk dalam daftar blokir port-forward-abuse. Pendaftaran whitelist akan otomatis membersihkan IP dari daftar ini.
-                {{if .AbuseTimeout}}<span class="status-sub-highlight">Timeout: <strong>{{.AbuseTimeout}}</strong></span>{{end}}
-                {{if .AbuseComment}}<span class="status-sub-highlight">Komentar: <code>{{.AbuseComment}}</code></span>{{end}}
-              {{else}}
-                IP aman dan tidak tercatat dalam daftar blokir port-forward-abuse MikroTik.
-              {{end}}
-            </p>
+      <div class="addr-card status-list-item {{if .IsInAbuseList}}card-danger abuse-item{{else}}card-clean clean-item{{end}}">
+        <div class="addr-card-header">
+          <div class="addr-title-group">
+            <span class="addr-status-dot status-indicator-dot {{if .IsInAbuseList}}dot-danger{{else}}dot-clean dot-active{{end}}"></span>
+            <span class="addr-list-title status-list-title">{{if .AbuseListName}}{{.AbuseListName}}{{else}}port-forward-abuse{{end}}</span>
+          </div>
+          <span class="addr-pill-badge status-badge-pill {{if .IsInAbuseList}}pill-red badge-pill-red{{else}}pill-clean badge-pill-clean{{end}}">
+            {{if .IsInAbuseList}}TERDETEKSI ABUSE{{else}}BERSIH (NORMAL){{end}}
+          </span>
+        </div>
+
+        <div class="addr-card-rows">
+          <div class="addr-row">
+            <span class="row-label">Status Abuse</span>
+            <span class="row-val {{if .IsInAbuseList}}val-red{{else}}val-clean{{end}}">
+              {{if .IsInAbuseList}}Terblokir Abuse{{else}}Bersih / Normal{{end}}
+            </span>
+          </div>
+          <div class="addr-row">
+            <span class="row-label">Sisa Waktu</span>
+            <span class="row-val mono">{{if and .IsInAbuseList .AbuseTimeout}}{{.AbuseTimeout}}{{else}}-{{end}}</span>
+          </div>
+          <div class="addr-row">
+            <span class="row-label">Komentar</span>
+            <span class="row-val mono">{{if and .IsInAbuseList .AbuseComment}}{{.AbuseComment}}{{else}}-{{end}}</span>
           </div>
         </div>
       </div>
