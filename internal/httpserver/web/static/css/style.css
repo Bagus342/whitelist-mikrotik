@@ -1220,6 +1220,14 @@ body {
   .bottom-grid-single {
     gap: 12px;
     margin-top: 12px;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .full-width-card {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   .merge-2-col {
@@ -1228,25 +1236,78 @@ body {
 
   .isp-select-card {
     padding: 16px;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
   .card-icon-box {
     width: 40px;
     height: 40px;
+    flex-shrink: 0;
+  }
+
+  .card-text {
+    min-width: 0;
   }
 
   .card-title {
     font-size: 0.95rem;
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
 
   .card-sub {
     font-size: 0.75rem;
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
 
   .card-action-btn {
     font-size: 0.725rem;
     padding: 4px 10px;
     white-space: nowrap;
+  }
+
+  /* Responsive Abuse Card: Prevent wrapper overflow on mobile screens */
+  .isp-select-card.abuse-card {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-areas:
+      "icon text"
+      "badge badge";
+    row-gap: 10px;
+    column-gap: 12px;
+    align-items: center;
+    padding: 14px 16px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
+  .isp-select-card.abuse-card .card-icon-box {
+    grid-area: icon;
+    align-self: center;
+  }
+
+  .isp-select-card.abuse-card .card-text {
+    grid-area: text;
+    min-width: 0;
+  }
+
+  .isp-select-card.abuse-card .card-action-btn {
+    grid-area: badge;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    justify-content: center;
+    display: flex;
+    align-items: center;
+    padding: 7px 12px;
+    font-size: 0.775rem;
+    white-space: normal;
+    word-break: break-word;
+    border-radius: var(--radius-sm);
   }
 
   .auto-confirm-content {
