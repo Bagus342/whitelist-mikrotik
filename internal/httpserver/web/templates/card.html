@@ -92,7 +92,7 @@
     <!-- Row 2 (Bawah): 1 Column Full Width -->
     <div class="bottom-grid-single">
       <!-- Card Status Port-Forwarder-Abuse (Full Width) -->
-      <div class="isp-select-card abuse-card full-width-card {{if .IsInAbuseList}}active-abuse{{else}}clean-abuse{{end}}" id="port-abuse-card">
+      <div class="isp-select-card abuse-card full-width-card {{if .IsInAbuseList}}active-abuse{{else}}clean-abuse{{end}}" id="port-abuse-card" data-list="{{if .AbuseListName}}{{.AbuseListName}}{{else}}port-forward-abuse{{end}}">
         <div class="card-icon-box {{if .IsInAbuseList}}abuse-box-danger{{else}}abuse-box-clean{{end}}">
           {{if .IsInAbuseList}}
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -108,17 +108,17 @@
           {{end}}
         </div>
         <div class="card-text">
-          <span class="card-title">Port Forwarder Abuse</span>
+          <span class="card-title">{{if .IsInAbuseList}}IP Diblokir{{else}}IP Bersih{{end}}</span>
           <span class="card-sub">
             {{if .IsInAbuseList}}
-              Terdaftar di port-forward-abuse
+              Jaringan anda terdeteksi aktifitas mencurigakan
             {{else}}
-              Tidak terdaftar di port-forward-abuse
+              Jaringan anda bersih dari aktifitas mencurigakan
             {{end}}
           </span>
         </div>
         <span class="card-action-btn {{if .IsInAbuseList}}btn-abuse-danger{{else}}btn-abuse-clean{{end}}">
-          {{if .IsInAbuseList}}Terdaftar di Port Abuse{{else}}Tidak Terdaftar di Port Abuse{{end}}
+          {{if .IsInAbuseList}}ABUSE DETECTION{{else}}CLEAN IP ADDRESS{{end}}
         </span>
       </div>
 

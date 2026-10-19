@@ -113,8 +113,14 @@ func TestWebUI_IndexDashboard(t *testing.T) {
 	if !strings.Contains(body, "port-forward-abuse") {
 		t.Errorf("expected body to include port-forward-abuse list name")
 	}
-	if !strings.Contains(body, "Tidak Terdaftar di Port Abuse") {
-		t.Errorf("expected abuse status to show 'Tidak Terdaftar di Port Abuse' for clean IP")
+	if !strings.Contains(body, "CLEAN IP ADDRESS") {
+		t.Errorf("expected abuse status to show 'CLEAN IP ADDRESS' for clean IP")
+	}
+	if !strings.Contains(body, "IP Bersih") {
+		t.Errorf("expected abuse status to show 'IP Bersih' for clean IP")
+	}
+	if !strings.Contains(body, "Jaringan anda bersih dari aktifitas mencurigakan") {
+		t.Errorf("expected clean subtitle in abuse card")
 	}
 }
 
@@ -177,8 +183,14 @@ func TestWebUI_AddressListStatusCard_Abuse(t *testing.T) {
 	if !strings.Contains(body, "port-forward-abuse") {
 		t.Errorf("expected body to contain port-forward-abuse")
 	}
-	if !strings.Contains(body, "Terdaftar di Port Abuse") {
-		t.Errorf("expected body to show 'Terdaftar di Port Abuse', got: %s", body)
+	if !strings.Contains(body, "ABUSE DETECTION") {
+		t.Errorf("expected body to show 'ABUSE DETECTION', got: %s", body)
+	}
+	if !strings.Contains(body, "IP Diblokir") {
+		t.Errorf("expected body to show 'IP Diblokir', got: %s", body)
+	}
+	if !strings.Contains(body, "Jaringan anda terdeteksi aktifitas mencurigakan") {
+		t.Errorf("expected abuse subtitle in abuse card")
 	}
 }
 
