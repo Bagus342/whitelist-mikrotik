@@ -402,8 +402,12 @@ body {
 /* Switch Grid Cards */
 .switch-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 16px;
+}
+
+.merge-2-col {
+  grid-column: span 2;
 }
 
 .isp-select-card {
@@ -466,6 +470,8 @@ body {
   background: #f1f5f9;
   color: var(--text-muted);
   transition: var(--transition-fast);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .isp-select-card.active-oxygen {
@@ -486,6 +492,54 @@ body {
 .isp-select-card.active-indihome .card-action-btn {
   background: var(--indihome-color);
   color: #ffffff;
+}
+
+/* Port Forwarder Abuse Status Card */
+.isp-select-card.abuse-card {
+  cursor: default;
+}
+.isp-select-card.abuse-card:hover {
+  transform: none;
+}
+
+.isp-select-card.clean-abuse {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+.isp-select-card.clean-abuse:hover {
+  background: #f0fdf4;
+  border-color: #86efac;
+  box-shadow: var(--shadow-card);
+}
+
+.isp-select-card.active-abuse {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+.isp-select-card.active-abuse:hover {
+  background: #fef2f2;
+  border-color: #f87171;
+  box-shadow: var(--shadow-card);
+}
+
+.abuse-box-clean {
+  background: #dcfce7;
+  color: #16a34a;
+}
+.abuse-box-danger {
+  background: #fee2e2;
+  color: var(--danger-color);
+}
+
+.btn-abuse-clean {
+  background: #dcfce7;
+  color: #15803d;
+  font-weight: 600;
+}
+.btn-abuse-danger {
+  background: var(--danger-color);
+  color: #ffffff;
+  font-weight: 600;
 }
 
 /* Auto Confirm Banner */
@@ -1146,6 +1200,10 @@ body {
   .switch-grid {
     grid-template-columns: 1fr;
     gap: 12px;
+  }
+
+  .merge-2-col {
+    grid-column: span 1;
   }
 
   .isp-select-card {
