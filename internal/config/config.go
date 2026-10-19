@@ -18,6 +18,8 @@ type Config struct {
 	MikrotikUser      string
 	MikrotikPassword         string
 	AuthBearerToken          string
+	WebAdminUser             string
+	WebAdminPassword         string
 	WhitelistListName        string
 	PortForwardAbuseListName string
 	WhitelistTTL             string        // Format accepted by RouterOS (e.g., "8h")
@@ -92,6 +94,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid OFFICE_PUBLIC_IPS: %w", err)
 	}
 
+	webAdminUser := getEnv("WEB_ADMIN_USERNAME", "admin")
+	webAdminPassword := os.Getenv("WEB_ADMIN_PASSWORD")
+	if webAdminPassword == "" {
+		webAdminPassword = authBearerToken
+	}
+
 	return &Config{
 		ListenAddr:               listenAddr,
 		MikrotikHost:             mkHost,
@@ -99,6 +107,8 @@ func Load() (*Config, error) {
 		MikrotikUser:             mkUser,
 		MikrotikPassword:         mkPassword,
 		AuthBearerToken:          authBearerToken,
+		WebAdminUser:             webAdminUser,
+		WebAdminPassword:         webAdminPassword,
 		WhitelistListName:        listName,
 		PortForwardAbuseListName: abuseListName,
 		WhitelistTTL:             ttlStr,
@@ -117,12 +127,12 @@ func (c *Config) String() string {
 		officeIPs = append(officeIPs, p.String())
 	}
 	authStatus := "disabled"
-	if c.AuthBearerToken != "" {
+	if c.AuthBearerToken != "" || c.WebAdminPassword != "" {
 		authStatus = "enabled"
 	}
 	return fmt.Sprintf(
-		"ListenAddr=%s MikrotikHost=%s:%d MikrotikUser=%s AuthBearer=%s WhitelistListName=%s PortForwardAbuseListName=%s WhitelistTTL=%s OfficeIPs=[%s] AllowIPv6=%t TZ=%s",
-		c.ListenAddr, c.MikrotikHost, c.MikrotikPort, c.MikrotikUser, authStatus, c.WhitelistListName, c.PortForwardAbuseListName, c.WhitelistTTL,
+		"ListenAddr=%s MikrotikHost=%s:%d MikrotikUser=%s AuthBearer=%s WebAdminUser=%s WhitelistListName=%s PortForwardAbuseListName=%s WhitelistTTL=%s OfficeIPs=[%s] AllowIPv6=%t TZ=%s",
+		c.ListenAddr, c.MikrotikHost, c.MikrotikPort, c.MikrotikUser, authStatus, c.WebAdminUser, c.WhitelistListName, c.PortForwardAbuseListName, c.WhitelistTTL,
 		strings.Join(officeIPs, ","), c.AllowIPv6, c.Timezone,
 	)
 }

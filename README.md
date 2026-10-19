@@ -4,7 +4,8 @@ Layanan HTTP sederhana, aman, dan *production-ready* yang dibangun dengan Go unt
 
 ## Fitur Utama
 
-- **Otomatisasi Whitelist**: Menambahkan IP baru dengan timeout terbatas atau memperpanjang masa berlaku jika IP sudah ada (`POST /v1/whitelist`).
+- **Web Portal UI Interaktif (HTMX)**: Antarmuka web modern, cepat, dan responsif dengan tema korporat PT Jagat Teknologi Indonesia. Mendukung auto-deteksi IP & hostname klien, pendaftaran/perpanjangan masa aktif IP, toggle izin Winbox, switching loading overlay, notifikasi toast, serta visualisasi tabel address-list MikroTik secara live.
+- **Otomatisasi Whitelist**: Menambahkan IP baru dengan timeout terbatas atau memperpanjang masa berlaku jika IP sudah ada (`POST /v1/whitelist` atau via Web UI).
 - **Identifikasi Hostname Target**: Komentar entri MikroTik disimpan dengan format `wl|<nama_hostname_target>` yang diambil dari parameter `hostname` klien, hasil resolusi reverse DNS IP target, atau fallback ke IP target jika tidak ditemukan.
 - **Autentikasi Bearer Token**: Mengamankan endpoint `/v1/whitelist` dengan Bearer Token (`Authorization: Bearer <token>`) yang diverifikasi dengan constant-time comparison (bebas timing attack). Endpoint `/healthz` tetap terbuka untuk health probe.
 - **Auto-Unblock dari Abuse List**: Jika IP target terdaftar di address-list `port-forward-abuse`, entri tersebut otomatis dihapus dari list abuse sebelum didaftarkan ke `remote-whitelist`.
@@ -75,7 +76,9 @@ cp .env.example .env
 | `MIKROTIK_PORT` | Integer | `8728` | Tidak | Port RouterOS API plaintext. |
 | `MIKROTIK_USER` | String | - | **Ya** | Username akun API MikroTik khusus layanan ini. |
 | `MIKROTIK_PASSWORD`| String | - | **Ya** | Password akun API MikroTik. |
-| `AUTH_BEARER_TOKEN` | String | `""` | Tidak | Token Bearer untuk memproteksi endpoint `/v1/whitelist` (opsional jika auth ditangani proxy). |
+| `AUTH_BEARER_TOKEN` | String | `""` | Tidak | Token Bearer untuk memproteksi endpoint API `/v1/whitelist` dan Web UI jika password tidak diset. |
+| `WEB_ADMIN_USERNAME`| String | `admin` | Tidak | Username administrator untuk login Web UI Portal. |
+| `WEB_ADMIN_PASSWORD`| String | `AUTH_BEARER_TOKEN` | Tidak | Password login Web UI (dapat berupa string atau hash PBKDF2). Default mewarisi `AUTH_BEARER_TOKEN`. |
 | `WHITELIST_LIST_NAME` | String | `remote-whitelist` | Tidak | Nama firewall address-list target di MikroTik. |
 | `PORT_FORWARD_ABUSE_LIST_NAME` | String | `port-forward-abuse` | Tidak | Nama firewall address-list deteksi abuse di MikroTik (otomatis dibersihkan saat whitelist). |
 | `WHITELIST_TTL` | String | `8h` | Tidak | Masa berlaku IP di MikroTik (format RouterOS: `8h`, `12h`, `1d`). |
@@ -249,7 +252,23 @@ wl.contoh.co.id {
 
 ## Penggunaan Klien
 
-### 1. Menggunakan Helper Script
+### 1. Menggunakan Web Portal Dashboard (Browser)
+
+Buka browser Anda dan akses alamat portal:
+```
+http://<ip-server>:8080/
+```
+Fitur Web Portal:
+- **Deteksi Otomatis**: Mendeteksi IP publik/klien dan hostname perangkat pengguna secara otomatis.
+- **Interaksi Instan dengan HTMX**:
+  - Tombol **"Aktifkan Whitelist"** / **"Perpanjang"** untuk mendaftarkan IP ke MikroTik RouterOS.
+  - Kartu toggle **"Akses Winbox"** untuk mengizinkan atau mencabut akses port Winbox 8291.
+  - Tombol **"Hapus Whitelist"** untuk membatalkan pendaftaran.
+- **Switching Overlay**: Animasi loading dan konfirmasi perpindahan status mirip dashboard ISP Switcher JTI.
+- **Tabel Live Firewall**: Menampilkan daftar seluruh IP yang sedang aktif ter-whitelist lengkap dengan sisa masa berlaku (timeout) dan filter pencarian real-time.
+- **Autentikasi Terintegrasi**: Jika `AUTH_BEARER_TOKEN` diaktifkan, portal menyediakan dialog input token yang tersimpan di cookie browser.
+
+### 2. Menggunakan Helper Script
 
 #### Linux & macOS (`scripts/wl.sh`)
 ```bash

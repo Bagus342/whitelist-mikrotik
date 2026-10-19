@@ -1,0 +1,116 @@
+<div class="hero-client-card" id="hero-client-card">
+  <div class="client-info-row">
+    <div class="client-meta">
+      <span class="meta-label">IP & Hostname Klien Terdeteksi</span>
+      <div class="ip-group">
+        <span class="ip-address" id="client-ip-text">{{.ClientIP}}</span>
+        <span class="badge-iface" id="client-hostname-text">{{if .Hostname}}{{.Hostname}}{{else}}Deteksi Perangkat...{{end}}</span>
+      </div>
+    </div>
+
+    <div class="isp-pill {{if .IsWhitelisted}}whitelisted{{else if .IsInAbuseList}}abuse{{else}}unwhitelisted{{end}}" id="client-isp-pill">
+      <span class="pill-dot"></span>
+      <span id="client-isp-text">
+        {{if .IsWhitelisted}}AKTIF (WHITELISTED){{else if .IsInAbuseList}}TERDETEKSI ABUSE{{else}}BELUM TERDAFTAR{{end}}
+      </span>
+    </div>
+  </div>
+
+  <!-- Client Input Form -->
+  <form id="whitelist-form" class="hero-form-row" onsubmit="return false;">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <div class="form-field">
+      <label for="input-ip">Alamat IP Target</label>
+      <input type="text" id="input-ip" name="ip" value="{{.ClientIP}}" placeholder="Contoh: 180.252.167.103" required>
+      <button type="button" id="btn-use-public-ip" class="btn-chip" style="display: none;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Gunakan IP Publik Saya
+      </button>
+    </div>
+
+    <div class="form-field">
+      <label for="input-hostname">Nama Hostname / Perangkat</label>
+      <input type="text" id="input-hostname" name="hostname" value="{{.Hostname}}" placeholder="Contoh: Laptop-Engineer" required>
+    </div>
+
+    <div class="form-field">
+      <label>Akses Layanan</label>
+      <label class="checkbox-toggle-card">
+        <input type="checkbox" id="check-winbox" name="winbox" value="true" {{if .IsWinboxAllowed}}checked{{end}}>
+        <span>Izinkan Winbox (8291)</span>
+      </label>
+    </div>
+  </form>
+
+  <div class="hero-card-divider"></div>
+
+  <!-- Action Switch Grid -->
+  <div class="switch-grid">
+    <!-- Whitelist Action Card -->
+    <button type="button" class="isp-select-card oxygen-card {{if .IsWhitelisted}}active-oxygen{{end}}"
+            data-action="whitelist"
+            hx-post="/ui/whitelist"
+            hx-include="#whitelist-form"
+            hx-target="#hero-client-card"
+            hx-swap="outerHTML">
+      <div class="card-icon-box oxygen-box">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="m9 12 2 2 4-4"/>
+        </svg>
+      </div>
+      <div class="card-text">
+        <span class="card-title">{{if .IsWhitelisted}}Perpanjang Whitelist{{else}}Aktifkan Whitelist{{end}}</span>
+        <span class="card-sub">
+          {{if .IsWhitelisted}}
+            Sisa Waktu: {{if .Timeout}}{{.Timeout}}{{else}}{{.WhitelistTTL}}{{end}}
+          {{else}}
+            Masa Aktif: {{.WhitelistTTL}}
+          {{end}}
+        </span>
+      </div>
+      <span class="card-action-btn">{{if .IsWhitelisted}}Perpanjang{{else}}Daftarkan IP{{end}}</span>
+    </button>
+
+    <!-- Winbox Action Card -->
+    <button type="button" class="isp-select-card indihome-card {{if .IsWinboxAllowed}}active-indihome{{end}}"
+            data-action="winbox"
+            onclick="document.getElementById('check-winbox').checked = !document.getElementById('check-winbox').checked; htmx.trigger(this.parentElement.querySelector('[data-action=whitelist]'), 'click');">
+      <div class="card-icon-box indihome-box">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect width="20" height="14" x="2" y="3" rx="2"/>
+          <line x1="8" x2="16" y1="21" y2="21"/>
+          <line x1="12" x2="12" y1="17" y2="21"/>
+        </svg>
+      </div>
+      <div class="card-text">
+        <span class="card-title">Akses Winbox</span>
+        <span class="card-sub">{{if .IsWinboxAllowed}}Port 8291 Diizinkan{{else}}Port 8291 Terkunci{{end}}</span>
+      </div>
+      <span class="card-action-btn">{{if .IsWinboxAllowed}}Winbox Aktif{{else}}Izinkan Winbox{{end}}</span>
+    </button>
+
+    <!-- Remove Whitelist Card -->
+    {{if .IsWhitelisted}}
+    <button type="button" class="isp-select-card"
+            data-action="unwhitelist"
+            hx-post="/ui/unwhitelist"
+            hx-include="#whitelist-form"
+            hx-target="#hero-client-card"
+            hx-swap="outerHTML"
+            hx-confirm="Apakah Anda yakin ingin menghapus IP {{.ClientIP}} dari remote-whitelist?">
+      <div class="card-icon-box" style="background: #fef2f2; color: var(--danger-color);">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+        </svg>
+      </div>
+      <div class="card-text">
+        <span class="card-title">Hapus Whitelist</span>
+        <span class="card-sub">Cabut akses firewall & Winbox</span>
+      </div>
+      <span class="card-action-btn" style="color: var(--danger-color);">Hapus Akses</span>
+    </button>
+    {{end}}
+  </div>
+</div>

@@ -42,6 +42,7 @@ func main() {
 	}()
 
 	handler := httpserver.NewHandler(validator, mkClient, logger)
+	handler.SetAuth(cfg.WebAdminUser, cfg.WebAdminPassword)
 	router := httpserver.SetupRouter(handler, cfg.AuthBearerToken, logger)
 
 	// 4. Configure http.Server with production timeouts

@@ -12,24 +12,51 @@ import (
 	"strings"
 	"time"
 
+	"whitelist-mikrotik/internal/auth"
 	"whitelist-mikrotik/internal/ipcheck"
 	"whitelist-mikrotik/internal/mikrotik"
 )
 
 // Handler contains dependencies for handling HTTP requests.
 type Handler struct {
-	validator *ipcheck.Validator
-	mkClient  mikrotik.Client
-	logger    *slog.Logger
+	validator       *ipcheck.Validator
+	mkClient        mikrotik.Client
+	logger          *slog.Logger
+	sessionStore    *auth.SessionStore
+	rateLimiter     *auth.RateLimiter
+	adminUser       string
+	adminPass       string
+	authBearerToken string
 }
 
 // NewHandler constructs a new Handler.
 func NewHandler(v *ipcheck.Validator, mk mikrotik.Client, l *slog.Logger) *Handler {
 	return &Handler{
-		validator: v,
-		mkClient:  mk,
-		logger:    l,
+		validator:    v,
+		mkClient:     mk,
+		logger:       l,
+		sessionStore: auth.NewSessionStore(12 * time.Hour),
+		rateLimiter:  auth.NewRateLimiter(5, 15*time.Minute, 5*time.Minute),
+		adminUser:    "admin",
 	}
+}
+
+// SetAuth configures credentials for web authentication.
+func (h *Handler) SetAuth(user, pass string) {
+	if strings.TrimSpace(user) != "" {
+		h.adminUser = strings.TrimSpace(user)
+	}
+	h.adminPass = strings.TrimSpace(pass)
+}
+
+// GetSessionStore returns the session store.
+func (h *Handler) GetSessionStore() *auth.SessionStore {
+	return h.sessionStore
+}
+
+// GetRateLimiter returns the brute force rate limiter.
+func (h *Handler) GetRateLimiter() *auth.RateLimiter {
+	return h.rateLimiter
 }
 
 // JSONResponse represents a generic JSON envelope for responses.
@@ -413,15 +440,52 @@ func (h *Handler) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 // SetupRouter initializes the HTTP multiplexer with all configured routes and middleware.
-// If authBearerToken is non-empty, /v1/whitelist routes are protected with BearerAuthMiddleware.
-// /healthz remains unauthenticated for health check probes.
+// If authBearerToken is non-empty, protected routes require Bearer or session authentication.
+// /healthz and /static/ remain unauthenticated.
 func SetupRouter(h *Handler, authBearerToken string, logger *slog.Logger) http.Handler {
+	trimmedToken := strings.TrimSpace(authBearerToken)
+	h.authBearerToken = trimmedToken
+	if trimmedToken != "" && h.adminPass == "" {
+		h.adminPass = trimmedToken
+	}
+
 	mux := http.NewServeMux()
 
-	whitelistHandler := BearerAuthMiddleware(authBearerToken, logger)(http.HandlerFunc(h.HandleWhitelist))
-	mux.Handle("/v1/whitelist", whitelistHandler)
+	webAuth := h.WebAuthMiddleware(trimmedToken)
+	csrfMw := h.CSRFMiddleware()
+	apiAuth := BearerAuthMiddleware(trimmedToken, logger)
+
+	// Static assets (CSS, JS, images)
+	mux.Handle("/static/", HandleStatic())
+
+	// Health check endpoint (always unauthenticated)
 	mux.HandleFunc("/healthz", h.HandleHealthz)
 
-	// Wrap with LoggingMiddleware
-	return LoggingMiddleware(logger)(mux)
+	// Web UI dedicated login & logout routes
+	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			h.HandleLoginSubmit(w, r)
+			return
+		}
+		h.HandleLoginPage(w, r)
+	})
+	mux.HandleFunc("/ui/login", h.HandleLoginSubmit)
+	mux.HandleFunc("/ui/logout", h.HandleLogout)
+
+	// Web UI Dashboard & HTMX endpoints (protected by session / bearer auth)
+	mux.Handle("/", webAuth(http.HandlerFunc(h.HandleIndex)))
+	mux.Handle("/ui/status", webAuth(http.HandlerFunc(h.HandleUIStatus)))
+	mux.Handle("/ui/whitelist", webAuth(csrfMw(http.HandlerFunc(h.HandleUIWhitelist))))
+	mux.Handle("/ui/unwhitelist", webAuth(csrfMw(http.HandlerFunc(h.HandleUIUnwhitelist))))
+	mux.Handle("/ui/entries", webAuth(csrfMw(http.HandlerFunc(h.HandleUIEntries))))
+
+	// JSON API endpoints for status and entries
+	mux.Handle("/api/status", webAuth(http.HandlerFunc(h.HandleAPIStatus)))
+	mux.Handle("/api/entries", webAuth(http.HandlerFunc(h.HandleAPIEntries)))
+
+	// API whitelist endpoint (curl / scripts)
+	mux.Handle("/v1/whitelist", apiAuth(http.HandlerFunc(h.HandleWhitelist)))
+
+	// Wrap with SecurityHeadersMiddleware and LoggingMiddleware
+	return SecurityHeadersMiddleware()(LoggingMiddleware(logger)(mux))
 }

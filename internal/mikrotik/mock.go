@@ -14,6 +14,8 @@ type MockClient struct {
 	RemoveFn       func(ctx context.Context, ip string) error
 	AllowWinboxFn  func(ctx context.Context, ip string) error
 	RemoveWinboxFn func(ctx context.Context, ip string) error
+	GetStatusFn    func(ctx context.Context, ip string) (*StatusResult, error)
+	ListEntriesFn  func(ctx context.Context) ([]EntryResult, error)
 	PingFn         func(ctx context.Context) error
 	CloseFn        func() error
 
@@ -211,6 +213,10 @@ func (m *MockClient) HasWinboxAddress(ip string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.hasWinboxAddressLocked(ip)
+}
+
+func (m *MockClient) hasWinboxAddressLocked(ip string) bool {
 	cidr := FormatWinboxCIDR(ip)
 	for _, addr := range m.WinboxAddresses {
 		if addr == cidr || addr == ip || strings.TrimSuffix(addr, "/32") == ip || strings.TrimSuffix(addr, "/128") == ip {
@@ -218,4 +224,96 @@ func (m *MockClient) HasWinboxAddress(ip string) bool {
 		}
 	}
 	return false
+}
+
+// GetStatus simulates querying whitelist status, abuse status, and winbox status for a given IP.
+func (m *MockClient) GetStatus(ctx context.Context, ip string) (*StatusResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.GetStatusFn != nil {
+		return m.GetStatusFn(ctx, ip)
+	}
+
+	entry, isWhitelisted := m.Entries[ip]
+	comment := ""
+	timeout := ""
+	hostname := ip
+	var expiresAt time.Time
+	if isWhitelisted {
+		comment = entry.Comment
+		timeout = entry.Timeout
+		expiresAt = entry.ExpiresAt
+		if strings.HasPrefix(comment, "wl|") {
+			hostname = strings.TrimPrefix(comment, "wl|")
+		}
+	}
+
+	_, inAbuse := m.AbuseEntries[ip]
+	isWinboxAllowed := m.hasWinboxAddressLocked(ip)
+
+	var allEntries []EntryResult
+	for _, e := range m.Entries {
+		isManaged := strings.HasPrefix(e.Comment, "wl|")
+		h := e.Comment
+		if isManaged {
+			h = strings.TrimPrefix(e.Comment, "wl|")
+		}
+		allEntries = append(allEntries, EntryResult{
+			ID:            e.ID,
+			Address:       e.Address,
+			List:          e.List,
+			Comment:       e.Comment,
+			Hostname:      h,
+			Timeout:       e.Timeout,
+			IsManaged:     isManaged,
+			WinboxAllowed: m.hasWinboxAddressLocked(e.Address),
+		})
+	}
+
+	return &StatusResult{
+		ClientIP:         ip,
+		Hostname:         hostname,
+		IsWhitelisted:    isWhitelisted,
+		Comment:          comment,
+		Timeout:          timeout,
+		ExpiresAt:        expiresAt,
+		IsInAbuseList:    inAbuse,
+		IsWinboxAllowed:  isWinboxAllowed,
+		TotalWhitelisted: len(m.Entries),
+		WhitelistTTL:     "8h",
+		MikrotikAddress:  "192.168.48.1:8728",
+		Entries:          allEntries,
+	}, nil
+}
+
+// ListEntries simulates listing all whitelist entries.
+func (m *MockClient) ListEntries(ctx context.Context) ([]EntryResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.ListEntriesFn != nil {
+		return m.ListEntriesFn(ctx)
+	}
+
+	var allEntries []EntryResult
+	for _, e := range m.Entries {
+		isManaged := strings.HasPrefix(e.Comment, "wl|")
+		h := e.Comment
+		if isManaged {
+			h = strings.TrimPrefix(e.Comment, "wl|")
+		}
+		allEntries = append(allEntries, EntryResult{
+			ID:            e.ID,
+			Address:       e.Address,
+			List:          e.List,
+			Comment:       e.Comment,
+			Hostname:      h,
+			Timeout:       e.Timeout,
+			IsManaged:     isManaged,
+			WinboxAllowed: m.hasWinboxAddressLocked(e.Address),
+		})
+	}
+
+	return allEntries, nil
 }

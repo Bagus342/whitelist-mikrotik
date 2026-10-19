@@ -1,0 +1,63 @@
+{{if .Entries}}
+  {{range .Entries}}
+    <tr data-address="{{.Address}}" data-comment="{{.Comment}}" data-list="{{.List}}" data-winbox="{{.WinboxAllowed}}" data-managed="{{.IsManaged}}">
+      <td class="font-mono" style="font-weight: 600; font-size: 0.9rem;">
+        {{.Address}}
+      </td>
+      <td>
+        <span style="font-weight: 600; color: var(--text-foreground);">{{if .Hostname}}{{.Hostname}}{{else}}-{{end}}</span>
+        {{if .IsManaged}}
+          <span class="badge-tag badge-active" style="margin-left: 6px; font-size: 0.7rem;">wl</span>
+        {{else}}
+          <span class="badge-tag" style="margin-left: 6px; font-size: 0.7rem; background: #f1f5f9; color: var(--text-muted);">manual</span>
+        {{end}}
+      </td>
+      <td>
+        <span class="isp-pill oxygen" style="padding: 4px 12px; font-size: 0.775rem;">
+          <span class="pill-dot"></span>
+          {{.List}}
+        </span>
+      </td>
+      <td class="font-mono" style="color: var(--text-muted); font-size: 0.85rem;">
+        {{if .Timeout}}{{.Timeout}}{{else}}-{{end}}
+      </td>
+      <td>
+        {{if .WinboxAllowed}}
+          <span class="badge-tag badge-winbox" style="font-weight: 600;">Port 8291 Aktif</span>
+        {{else}}
+          <span style="color: var(--text-dim); font-size: 0.8rem;">-</span>
+        {{end}}
+      </td>
+      <td class="text-right">
+        <div style="display: inline-flex; gap: 8px;">
+          <button class="btn btn-ghost btn-sm"
+                  title="Perpanjang masa aktif IP ini"
+                  hx-post="/ui/whitelist"
+                  hx-vals='{"ip": "{{.Address}}", "hostname": "{{.Hostname}}"}'
+                  hx-target="#hero-client-card"
+                  hx-swap="outerHTML">
+            Perpanjang
+          </button>
+          {{if .IsManaged}}
+            <button class="btn btn-danger-sm"
+                    title="Hapus IP dari remote-whitelist"
+                    hx-delete="/ui/entries?ip={{.Address}}"
+                    hx-target="closest tr"
+                    hx-swap="outerHTML swap:300ms"
+                    hx-confirm="Yakin ingin menghapus IP {{.Address}} dari address-list?">
+              Hapus
+            </button>
+          {{else}}
+            <span style="color: var(--text-dim); font-size: 0.75rem; align-self: center;" title="Entri admin tidak dapat dihapus otomatis via portal">Admin</span>
+          {{end}}
+        </div>
+      </td>
+    </tr>
+  {{end}}
+{{else}}
+  <tr>
+    <td colspan="6" class="table-placeholder">
+      Belum ada IP yang terdaftar di address-list remote-whitelist MikroTik.
+    </td>
+  </tr>
+{{end}}

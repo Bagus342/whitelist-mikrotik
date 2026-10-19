@@ -40,12 +40,44 @@ type WhitelistResult struct {
 	RemovedFromAbuse bool
 }
 
+// StatusResult holds telemetry and whitelist status for a specific client IP.
+type StatusResult struct {
+	ClientIP         string        `json:"client_ip"`
+	Hostname         string        `json:"hostname"`
+	IsWhitelisted    bool          `json:"is_whitelisted"`
+	Comment          string        `json:"comment,omitempty"`
+	Timeout          string        `json:"timeout,omitempty"`
+	ExpiresAt        time.Time     `json:"expires_at,omitempty"`
+	IsInAbuseList    bool          `json:"is_in_abuse_list"`
+	IsWinboxAllowed  bool          `json:"is_winbox_allowed"`
+	TotalWhitelisted int           `json:"total_whitelisted"`
+	WhitelistTTL     string        `json:"whitelist_ttl"`
+	MikrotikAddress  string        `json:"mikrotik_address"`
+	Username         string        `json:"username,omitempty"`
+	CSRFToken        string        `json:"csrf_token,omitempty"`
+	Entries          []EntryResult `json:"entries,omitempty"`
+}
+
+// EntryResult represents a single firewall address-list entry.
+type EntryResult struct {
+	ID            string `json:"id"`
+	Address       string `json:"address"`
+	List          string `json:"list"`
+	Comment       string `json:"comment"`
+	Hostname      string `json:"hostname"`
+	Timeout       string `json:"timeout"`
+	IsManaged     bool   `json:"is_managed"`
+	WinboxAllowed bool   `json:"winbox_allowed"`
+}
+
 // Client defines the interface for interacting with MikroTik RouterOS firewall address lists and services.
 type Client interface {
 	Whitelist(ctx context.Context, ip string, hostname ...string) (*WhitelistResult, error)
 	Remove(ctx context.Context, ip string) error
 	AllowWinbox(ctx context.Context, ip string) error
 	RemoveWinbox(ctx context.Context, ip string) error
+	GetStatus(ctx context.Context, ip string) (*StatusResult, error)
+	ListEntries(ctx context.Context) ([]EntryResult, error)
 	Ping(ctx context.Context) error
 	Close() error
 }
@@ -162,6 +194,7 @@ type addressListEntry struct {
 	list    string
 	address string
 	comment string
+	timeout string
 }
 
 // findEntries queries /ip/firewall/address-list for entries matching the given list and IP.
@@ -179,6 +212,7 @@ func (c *RouterOSClient) findEntries(ctx context.Context, listName, ip string) (
 				list:    sen.Map["list"],
 				address: sen.Map["address"],
 				comment: sen.Map["comment"],
+				timeout: sen.Map["timeout"],
 			})
 		}
 	}
@@ -514,3 +548,128 @@ func (c *RouterOSClient) RemoveWinbox(ctx context.Context, ip string) error {
 	)
 	return nil
 }
+
+// ListEntries returns all entries currently in the whitelist address-list,
+// along with their managed status and whether they are allowed for Winbox.
+func (c *RouterOSClient) ListEntries(ctx context.Context) ([]EntryResult, error) {
+	listName := c.cfg.WhitelistListName
+	reply, err := c.runCommand(ctx, "/ip/firewall/address-list/print", "?list="+listName)
+	if err != nil {
+		return nil, fmt.Errorf("mikrotik query address-list error: %w", err)
+	}
+
+	// Fetch winbox addresses
+	var winboxAddrs []string
+	if wbReply, wbErr := c.runCommand(ctx, "/ip/service/print", "?name=winbox"); wbErr == nil && len(wbReply.Re) > 0 {
+		winboxAddrs = parseAddressList(wbReply.Re[0].Map["address"])
+	}
+
+	var entries []EntryResult
+	for _, sen := range reply.Re {
+		if sen.Map["list"] != listName {
+			continue
+		}
+		addr := sen.Map["address"]
+		comment := sen.Map["comment"]
+		timeout := sen.Map["timeout"]
+		isManaged := strings.HasPrefix(comment, "wl|")
+		hostname := ""
+		if isManaged {
+			hostname = strings.TrimPrefix(comment, "wl|")
+		} else {
+			hostname = comment
+		}
+
+		targetCIDR := FormatWinboxCIDR(addr)
+		wbAllowed := false
+		for _, wb := range winboxAddrs {
+			if wb == targetCIDR || wb == addr || strings.TrimSuffix(wb, "/32") == addr || strings.TrimSuffix(wb, "/128") == addr {
+				wbAllowed = true
+				break
+			}
+		}
+
+		entries = append(entries, EntryResult{
+			ID:            sen.Map[".id"],
+			Address:       addr,
+			List:          sen.Map["list"],
+			Comment:       comment,
+			Hostname:      hostname,
+			Timeout:       timeout,
+			IsManaged:     isManaged,
+			WinboxAllowed: wbAllowed,
+		})
+	}
+
+	return entries, nil
+}
+
+// GetStatus returns the current whitelist status, abuse status, and winbox status for a given client IP.
+func (c *RouterOSClient) GetStatus(ctx context.Context, ip string) (*StatusResult, error) {
+	listName := c.cfg.WhitelistListName
+	abuseListName := c.cfg.PortForwardAbuseListName
+
+	// 1. Query whitelist entries for this IP
+	wlEntries, err := c.findEntries(ctx, listName, ip)
+	if err != nil {
+		return nil, fmt.Errorf("mikrotik query whitelist status error: %w", err)
+	}
+
+	isWhitelisted := len(wlEntries) > 0
+	comment := ""
+	timeout := ""
+	if isWhitelisted {
+		comment = wlEntries[0].comment
+		timeout = wlEntries[0].timeout
+	}
+
+	// 2. Query abuse entries for this IP
+	inAbuse := false
+	if strings.TrimSpace(abuseListName) != "" {
+		if abuseEntries, aErr := c.findEntries(ctx, abuseListName, ip); aErr == nil {
+			inAbuse = len(abuseEntries) > 0
+		}
+	}
+
+	// 3. Query Winbox status
+	isWinboxAllowed := false
+	targetCIDR := FormatWinboxCIDR(ip)
+	if wbReply, wbErr := c.runCommand(ctx, "/ip/service/print", "?name=winbox"); wbErr == nil && len(wbReply.Re) > 0 {
+		addresses := parseAddressList(wbReply.Re[0].Map["address"])
+		for _, addr := range addresses {
+			if addr == targetCIDR || addr == ip || strings.TrimSuffix(addr, "/32") == ip || strings.TrimSuffix(addr, "/128") == ip {
+				isWinboxAllowed = true
+				break
+			}
+		}
+	}
+
+	// 4. Query total entries in whitelist list
+	allEntries, _ := c.ListEntries(ctx)
+	totalWhitelisted := len(allEntries)
+
+	// 5. Determine hostname
+	hostname := ""
+	if isWhitelisted && strings.HasPrefix(comment, "wl|") {
+		hostname = strings.TrimPrefix(comment, "wl|")
+	} else {
+		hostname = ResolveHostname(ctx, ip)
+	}
+
+	routerAddr := fmt.Sprintf("%s:%d", c.cfg.MikrotikHost, c.cfg.MikrotikPort)
+
+	return &StatusResult{
+		ClientIP:         ip,
+		Hostname:         hostname,
+		IsWhitelisted:    isWhitelisted,
+		Comment:          comment,
+		Timeout:          timeout,
+		IsInAbuseList:    inAbuse,
+		IsWinboxAllowed:  isWinboxAllowed,
+		TotalWhitelisted: totalWhitelisted,
+		WhitelistTTL:     c.cfg.WhitelistTTL,
+		MikrotikAddress:  routerAddr,
+		Entries:          allEntries,
+	}, nil
+}
+
