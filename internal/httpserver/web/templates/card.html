@@ -8,10 +8,9 @@
 
   <div class="client-info-row">
     <div class="client-meta">
-      <span class="meta-label">IP, Hostname & Provider Terdeteksi</span>
+      <span class="meta-label">Alamat IP & Provider Terdeteksi</span>
       <div class="ip-group">
         <span class="ip-address" id="client-ip-text">{{.ClientIP}}</span>
-        <span class="badge-iface" id="client-hostname-text" title="Hostname / Perangkat">{{if .Hostname}}{{.Hostname}}{{else}}Deteksi Perangkat...{{end}}</span>
         <span class="badge-provider" id="client-provider-badge" title="Internet Service Provider (ISP)">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
@@ -66,15 +65,36 @@
       <span class="card-action-btn">{{if .IsWhitelisted}}Perpanjang{{else}}Daftarkan IP{{end}}</span>
     </button>
 
+    <!-- Whitelist Winbox (Port 8291) Action Card -->
+    <button type="button" class="isp-select-card indihome-card {{if .IsWinboxAllowed}}active-indihome{{end}}"
+            data-action="winbox"
+            hx-post="/ui/winbox"
+            hx-include="#whitelist-form"
+            hx-target="#hero-client-card"
+            hx-swap="outerHTML">
+      <div class="card-icon-box indihome-box">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect width="20" height="14" x="2" y="3" rx="2"/>
+          <line x1="8" x2="16" y1="21" y2="21"/>
+          <line x1="12" x2="12" y1="17" y2="21"/>
+        </svg>
+      </div>
+      <div class="card-text">
+        <span class="card-title">{{if .IsWinboxAllowed}}Winbox Diizinkan{{else}}Whitelist Winbox{{end}}</span>
+        <span class="card-sub">{{if .IsWinboxAllowed}}Port 8291 Aktif{{else}}Akses RouterOS Port 8291{{end}}</span>
+      </div>
+      <span class="card-action-btn">{{if .IsWinboxAllowed}}Cabut Winbox{{else}}Izinkan Winbox{{end}}</span>
+    </button>
+
     <!-- Remove Whitelist Card -->
-    {{if .IsWhitelisted}}
+    {{if or .IsWhitelisted .IsWinboxAllowed}}
     <button type="button" class="isp-select-card"
             data-action="unwhitelist"
             hx-post="/ui/unwhitelist"
             hx-include="#whitelist-form"
             hx-target="#hero-client-card"
             hx-swap="outerHTML"
-            hx-confirm="Apakah Anda yakin ingin menghapus IP {{.ClientIP}} dari remote-whitelist?">
+            hx-confirm="Apakah Anda yakin ingin menghapus IP {{.ClientIP}} dari whitelist MikroTik?">
       <div class="card-icon-box" style="background: #fef2f2; color: var(--danger-color);">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="3 6 5 6 21 6"/>
@@ -83,7 +103,7 @@
       </div>
       <div class="card-text">
         <span class="card-title">Hapus Whitelist</span>
-        <span class="card-sub">Cabut akses firewall</span>
+        <span class="card-sub">Cabut akses firewall & Winbox</span>
       </div>
       <span class="card-action-btn" style="color: var(--danger-color);">Hapus Akses</span>
     </button>

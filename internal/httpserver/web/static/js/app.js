@@ -4,51 +4,11 @@
 // ==========================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
-  initHostnameDetection();
   initProviderDetection();
   initPublicIPDetection();
   initHTMXEvents();
   initTableSearch();
 });
-
-// ==========================================================================
-// 1. HOSTNAME & IP DETECTION
-// ==========================================================================
-
-function getDeviceName() {
-  const ua = navigator.userAgent || '';
-  if (/Windows NT 10.0/i.test(ua)) return 'Windows10-PC';
-  if (/Windows NT 11.0/i.test(ua) || (/Windows/i.test(ua) && /Win64/i.test(ua))) return 'Windows-PC';
-  if (/Macintosh|Mac OS X/i.test(ua)) return 'MacBook';
-  if (/Android/i.test(ua)) return 'Android-Device';
-  if (/iPhone|iPad/i.test(ua)) return 'iOS-Device';
-  if (/Linux/i.test(ua)) return 'Linux-PC';
-  return 'Klien-Remote';
-}
-
-function initHostnameDetection() {
-  const hostnameInput = document.getElementById('input-hostname');
-  const hostnameBadge = document.getElementById('client-hostname-text');
-  const savedHostname = localStorage.getItem('jti_wl_hostname');
-
-  if (hostnameInput) {
-    // If input is empty or defaults to raw IP, populate with saved or detected device name
-    const currentVal = hostnameInput.value.trim();
-    if (!currentVal || currentVal.includes(':') || /^\d+\.\d+\.\d+\.\d+$/.test(currentVal)) {
-      const detected = savedHostname || getDeviceName();
-      hostnameInput.value = detected;
-      if (hostnameBadge) hostnameBadge.textContent = detected;
-    }
-
-    hostnameInput.addEventListener('change', () => {
-      const val = hostnameInput.value.trim();
-      if (val) {
-        localStorage.setItem('jti_wl_hostname', val);
-        if (hostnameBadge) hostnameBadge.textContent = val;
-      }
-    });
-  }
-}
 
 // ==========================================================================
 // 1b. PROVIDER / ISP DETECTION (from scan_ip_satu_persatu_mikrotik.sh logic)
@@ -325,8 +285,7 @@ function initHTMXEvents() {
     // Hide overlay after a minimum smooth transition of 600ms
     setTimeout(hideSwitchingOverlay, 600);
 
-    // Re-initialize hostname, provider, and inputs if hero card was swapped
-    initHostnameDetection();
+    // Re-initialize provider and inputs if hero card was swapped
     initProviderDetection();
 
     // Check for HX-Trigger toast header

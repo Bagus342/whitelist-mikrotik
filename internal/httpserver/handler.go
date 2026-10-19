@@ -476,6 +476,7 @@ func SetupRouter(h *Handler, authBearerToken string, logger *slog.Logger) http.H
 	mux.Handle("/", webAuth(http.HandlerFunc(h.HandleIndex)))
 	mux.Handle("/ui/status", webAuth(http.HandlerFunc(h.HandleUIStatus)))
 	mux.Handle("/ui/whitelist", webAuth(csrfMw(http.HandlerFunc(h.HandleUIWhitelist))))
+	mux.Handle("/ui/winbox", webAuth(csrfMw(http.HandlerFunc(h.HandleUIWinbox))))
 	mux.Handle("/ui/unwhitelist", webAuth(csrfMw(http.HandlerFunc(h.HandleUIUnwhitelist))))
 	mux.Handle("/ui/entries", webAuth(csrfMw(http.HandlerFunc(h.HandleUIEntries))))
 

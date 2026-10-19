@@ -198,6 +198,70 @@ func (h *Handler) HandleUIWhitelist(w http.ResponseWriter, r *http.Request) {
 	_ = cardTmpl.Execute(w, status)
 }
 
+// HandleUIWinbox handles HTMX POST for toggling Winbox port 8291 access for client IP.
+func (h *Handler) HandleUIWinbox(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	reqID := GetRequestID(ctx)
+
+	if err := r.ParseForm(); err != nil {
+		setHXToastHeader(w, "Format form tidak valid", "error")
+		http.Error(w, "Format form tidak valid", http.StatusBadRequest)
+		return
+	}
+
+	rawIP := strings.TrimSpace(r.FormValue("ip"))
+	if rawIP == "" {
+		rawIP = extractSourceIP(r)
+	}
+
+	addr, err := h.validator.Validate(rawIP)
+	if err != nil {
+		msg := "IP tidak valid atau tidak diizinkan"
+		setHXToastHeader(w, msg, "error")
+		http.Error(w, msg, http.StatusBadRequest)
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("action")))
+	if action == "" {
+		action = strings.ToLower(strings.TrimSpace(r.FormValue("action")))
+	}
+
+	statusBefore, _ := h.mkClient.GetStatus(ctx, addr.String())
+	isAllowed := statusBefore != nil && statusBefore.IsWinboxAllowed
+
+	if action == "remove" || (action == "" && isAllowed) {
+		if err := h.mkClient.RemoveWinbox(ctx, addr.String()); err != nil {
+			h.logger.Error("ui remove winbox failed", "request_id", reqID, "ip", addr.String(), "error", err)
+			setHXToastHeader(w, "Gagal mencabut akses Winbox", "error")
+			http.Error(w, "Gagal mencabut akses Winbox", http.StatusBadGateway)
+			return
+		}
+		setHXToastHeader(w, fmt.Sprintf("Akses Winbox untuk IP %s berhasil dicabut", addr.String()), "success")
+	} else {
+		// Also ensure IP is present in remote-whitelist
+		rawHostname := strings.TrimSpace(r.FormValue("hostname"))
+		hostname := mikrotik.SanitizeHostname(rawHostname)
+		if hostname == "" {
+			hostname = mikrotik.ResolveHostname(ctx, addr.String())
+		}
+		_, _ = h.mkClient.Whitelist(ctx, addr.String(), hostname)
+
+		if err := h.mkClient.AllowWinbox(ctx, addr.String()); err != nil {
+			h.logger.Error("ui allow winbox failed", "request_id", reqID, "ip", addr.String(), "error", err)
+			setHXToastHeader(w, "Gagal mengizinkan Winbox di MikroTik", "error")
+			http.Error(w, "Gagal mengizinkan Winbox", http.StatusBadGateway)
+			return
+		}
+		setHXToastHeader(w, fmt.Sprintf("Akses Winbox (Port 8291) berhasil diizinkan untuk IP %s", addr.String()), "success")
+	}
+
+	w.Header().Set("HX-Trigger-After-Swap", `{"refreshEntries": true}`)
+	status := h.getStatusOrFallback(r, addr.String())
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = cardTmpl.Execute(w, status)
+}
+
 // HandleUIUnwhitelist handles HTMX POST for removing an IP from whitelist.
 func (h *Handler) HandleUIUnwhitelist(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()

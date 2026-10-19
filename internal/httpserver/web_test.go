@@ -83,6 +83,21 @@ func TestWebUI_IndexDashboard(t *testing.T) {
 	if !strings.Contains(body, "client-provider-text") {
 		t.Errorf("expected body to include client-provider-text")
 	}
+	if strings.Contains(body, "client-hostname-text") {
+		t.Errorf("expected hostname badge to be removed from UI")
+	}
+	if !strings.Contains(body, "Whitelist Winbox") {
+		t.Errorf("expected body to include Whitelist Winbox card")
+	}
+	if strings.Contains(body, "Router Terhubung") {
+		t.Errorf("expected 'Router Terhubung' to be removed from navbar")
+	}
+	if strings.Contains(body, "user-badge") {
+		t.Errorf("expected user badge to be removed from navbar")
+	}
+	if !strings.Contains(body, "Keluar") {
+		t.Errorf("expected logout button 'Keluar' to be present")
+	}
 	if !strings.Contains(body, "switching-modal-overlay") {
 		t.Errorf("expected body to include switching overlay modal")
 	}
@@ -175,6 +190,58 @@ func TestWebUI_UIWhitelist_And_Unwhitelist(t *testing.T) {
 	}
 	if mockMk.HasWinboxAddress(targetIP) {
 		t.Errorf("expected IP %s to be removed from Winbox", targetIP)
+	}
+}
+
+func TestWebUI_UIWinbox(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	targetIP := "203.0.113.130"
+
+	// 1. POST /ui/winbox to allow Winbox
+	form := url.Values{}
+	form.Set("ip", targetIP)
+
+	req := httptest.NewRequest(http.MethodPost, "/ui/winbox", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on /ui/winbox, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if !mockMk.HasWinboxAddress(targetIP) {
+		t.Errorf("expected IP %s to be allowed in Winbox", targetIP)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "Winbox Diizinkan") {
+		t.Errorf("expected body to contain 'Winbox Diizinkan', got: %s", body)
+	}
+	if !strings.Contains(body, "Cabut Winbox") {
+		t.Errorf("expected body to have 'Cabut Winbox' button")
+	}
+
+	// 2. POST /ui/winbox again to toggle/remove Winbox
+	unreq := httptest.NewRequest(http.MethodPost, "/ui/winbox", strings.NewReader(form.Encode()))
+	unreq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	unw := httptest.NewRecorder()
+
+	router.ServeHTTP(unw, unreq)
+
+	if unw.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on /ui/winbox remove, got %d: %s", unw.Code, unw.Body.String())
+	}
+
+	if mockMk.HasWinboxAddress(targetIP) {
+		t.Errorf("expected IP %s to be removed from Winbox", targetIP)
+	}
+
+	unbody := unw.Body.String()
+	if !strings.Contains(unbody, "Whitelist Winbox") {
+		t.Errorf("expected body to contain 'Whitelist Winbox'")
 	}
 }
 
@@ -397,8 +464,8 @@ func TestWebUI_Login_Success_SetsSecureHttpOnlySessionCookie(t *testing.T) {
 	if wDash.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK on / with session cookie, got %d: %s", wDash.Code, wDash.Body.String())
 	}
-	if !strings.Contains(wDash.Body.String(), "admin") {
-		t.Errorf("expected dashboard to contain logged in username 'admin'")
+	if !strings.Contains(wDash.Body.String(), "Keluar") {
+		t.Errorf("expected dashboard to contain logout button 'Keluar'")
 	}
 	if !strings.Contains(wDash.Body.String(), "hero-client-card") {
 		t.Errorf("expected dashboard to contain hero card")
