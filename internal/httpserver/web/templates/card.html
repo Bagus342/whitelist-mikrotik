@@ -1,4 +1,4 @@
-<div class="hero-client-card" id="hero-client-card">
+<div class="portal-main-stack" id="hero-client-card">
   <!-- Hidden form to supply detected IP, Hostname, and CSRF Token to HTMX actions -->
   <form id="whitelist-form" style="display: none;" onsubmit="return false;">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
@@ -6,191 +6,267 @@
     <input type="hidden" id="input-hostname" name="hostname" value="{{.Hostname}}">
   </form>
 
-  <div class="client-info-row">
-    <div class="client-meta">
-      <span class="meta-label">Alamat IP & Provider Terdeteksi</span>
-      <div class="ip-group">
-        <span class="ip-address" id="client-ip-text">{{.ClientIP}}</span>
-        <span class="badge-provider" id="client-provider-badge" title="Internet Service Provider (ISP)">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
-            <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
-            <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
-            <circle cx="12" cy="20" r="1"/>
+  <!-- CARD 1: Client Hero & Action Controls (Kartu Atas) -->
+  <div class="hero-client-card">
+    <div class="client-info-row">
+      <div class="client-meta">
+        <span class="meta-label">Alamat IP & Provider Terdeteksi</span>
+        <div class="ip-group">
+          <span class="ip-address" id="client-ip-text">{{.ClientIP}}</span>
+          <span class="badge-provider" id="client-provider-badge" title="Internet Service Provider (ISP)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+              <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+              <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+              <circle cx="12" cy="20" r="1"/>
+            </svg>
+            <span id="client-provider-text">{{if .ISP}}{{.ISP}}{{else}}Deteksi Provider...{{end}}</span>
+          </span>
+          <button type="button" id="btn-use-public-ip" class="btn-chip" style="display: none;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            Gunakan IP Publik Saya
+          </button>
+        </div>
+      </div>
+
+      <div class="isp-pill {{if .IsWhitelisted}}whitelisted{{else if .IsInAbuseList}}abuse{{else}}unwhitelisted{{end}}" id="client-isp-pill">
+        <span class="pill-dot"></span>
+        <span id="client-isp-text">
+          {{if .IsWhitelisted}}AKTIF (WHITELISTED){{else if .IsInAbuseList}}TERDETEKSI ABUSE{{else}}BELUM TERDAFTAR{{end}}
+        </span>
+      </div>
+    </div>
+
+    <div class="hero-card-divider"></div>
+
+    <!-- Action Switch Grid -->
+    <div class="switch-grid">
+      <!-- Whitelist Action Card -->
+      <button type="button" class="isp-select-card oxygen-card {{if .IsWhitelisted}}active-oxygen{{end}}"
+              data-action="whitelist"
+              hx-post="/ui/whitelist"
+              hx-include="#whitelist-form"
+              hx-target="#hero-client-card"
+              hx-swap="outerHTML">
+        <div class="card-icon-box oxygen-box">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="m9 12 2 2 4-4"/>
           </svg>
-          <span id="client-provider-text">{{if .ISP}}{{.ISP}}{{else}}Deteksi Provider...{{end}}</span>
-        </span>
-        <button type="button" id="btn-use-public-ip" class="btn-chip" style="display: none;">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-          Gunakan IP Publik Saya
-        </button>
-      </div>
-    </div>
+        </div>
+        <div class="card-text">
+          <span class="card-title">{{if .IsWhitelisted}}Perpanjang Whitelist{{else}}Aktifkan Whitelist{{end}}</span>
+          <span class="card-sub">
+            {{if .IsWhitelisted}}
+              Sisa Waktu: {{if .Timeout}}{{.Timeout}}{{else}}{{.WhitelistTTL}}{{end}}
+            {{else}}
+              Masa Aktif: {{.WhitelistTTL}}
+            {{end}}
+          </span>
+        </div>
+        <span class="card-action-btn">{{if .IsWhitelisted}}Perpanjang{{else}}Daftarkan IP{{end}}</span>
+      </button>
 
-    <div class="isp-pill {{if .IsWhitelisted}}whitelisted{{else if .IsInAbuseList}}abuse{{else}}unwhitelisted{{end}}" id="client-isp-pill">
-      <span class="pill-dot"></span>
-      <span id="client-isp-text">
-        {{if .IsWhitelisted}}AKTIF (WHITELISTED){{else if .IsInAbuseList}}TERDETEKSI ABUSE{{else}}BELUM TERDAFTAR{{end}}
-      </span>
+      <!-- Whitelist Winbox (Port 8291) Action Card -->
+      <button type="button" class="isp-select-card indihome-card {{if .IsWinboxAllowed}}active-indihome{{end}}"
+              data-action="winbox"
+              hx-post="/ui/winbox"
+              hx-include="#whitelist-form"
+              hx-target="#hero-client-card"
+              hx-swap="outerHTML">
+        <div class="card-icon-box indihome-box">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect width="20" height="14" x="2" y="3" rx="2"/>
+            <line x1="8" x2="16" y1="21" y2="21"/>
+            <line x1="12" x2="12" y1="17" y2="21"/>
+          </svg>
+        </div>
+        <div class="card-text">
+          <span class="card-title">{{if .IsWinboxAllowed}}Winbox Diizinkan{{else}}Whitelist Winbox{{end}}</span>
+          <span class="card-sub">{{if .IsWinboxAllowed}}Port 8291 Aktif{{else}}Akses RouterOS Port 8291{{end}}</span>
+        </div>
+        <span class="card-action-btn">{{if .IsWinboxAllowed}}Cabut Winbox{{else}}Izinkan Winbox{{end}}</span>
+      </button>
+
+      <!-- Remove Whitelist Card -->
+      {{if or .IsWhitelisted .IsWinboxAllowed}}
+      <button type="button" class="isp-select-card"
+              data-action="unwhitelist"
+              hx-post="/ui/unwhitelist"
+              hx-include="#whitelist-form"
+              hx-target="#hero-client-card"
+              hx-swap="outerHTML"
+              hx-confirm="Apakah Anda yakin ingin menghapus IP {{.ClientIP}} dari whitelist MikroTik?">
+        <div class="card-icon-box" style="background: #fef2f2; color: var(--danger-color);">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+          </svg>
+        </div>
+        <div class="card-text">
+          <span class="card-title">Hapus Whitelist</span>
+          <span class="card-sub">Cabut akses firewall & Winbox</span>
+        </div>
+        <span class="card-action-btn" style="color: var(--danger-color);">Hapus Akses</span>
+      </button>
+      {{end}}
     </div>
   </div>
 
-  <div class="hero-card-divider"></div>
-
-  <!-- Action Switch Grid -->
-  <div class="switch-grid">
-    <!-- Whitelist Action Card -->
-    <button type="button" class="isp-select-card oxygen-card {{if .IsWhitelisted}}active-oxygen{{end}}"
-            data-action="whitelist"
-            hx-post="/ui/whitelist"
-            hx-include="#whitelist-form"
-            hx-target="#hero-client-card"
-            hx-swap="outerHTML">
-      <div class="card-icon-box oxygen-box">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          <path d="m9 12 2 2 4-4"/>
-        </svg>
-      </div>
-      <div class="card-text">
-        <span class="card-title">{{if .IsWhitelisted}}Perpanjang Whitelist{{else}}Aktifkan Whitelist{{end}}</span>
-        <span class="card-sub">
-          {{if .IsWhitelisted}}
-            Sisa Waktu: {{if .Timeout}}{{.Timeout}}{{else}}{{.WhitelistTTL}}{{end}}
-          {{else}}
-            Masa Aktif: {{.WhitelistTTL}}
-          {{end}}
-        </span>
-      </div>
-      <span class="card-action-btn">{{if .IsWhitelisted}}Perpanjang{{else}}Daftarkan IP{{end}}</span>
-    </button>
-
-    <!-- Whitelist Winbox (Port 8291) Action Card -->
-    <button type="button" class="isp-select-card indihome-card {{if .IsWinboxAllowed}}active-indihome{{end}}"
-            data-action="winbox"
-            hx-post="/ui/winbox"
-            hx-include="#whitelist-form"
-            hx-target="#hero-client-card"
-            hx-swap="outerHTML">
-      <div class="card-icon-box indihome-box">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect width="20" height="14" x="2" y="3" rx="2"/>
-          <line x1="8" x2="16" y1="21" y2="21"/>
-          <line x1="12" x2="12" y1="17" y2="21"/>
-        </svg>
-      </div>
-      <div class="card-text">
-        <span class="card-title">{{if .IsWinboxAllowed}}Winbox Diizinkan{{else}}Whitelist Winbox{{end}}</span>
-        <span class="card-sub">{{if .IsWinboxAllowed}}Port 8291 Aktif{{else}}Akses RouterOS Port 8291{{end}}</span>
-      </div>
-      <span class="card-action-btn">{{if .IsWinboxAllowed}}Cabut Winbox{{else}}Izinkan Winbox{{end}}</span>
-    </button>
-
-    <!-- Remove Whitelist Card -->
-    {{if or .IsWhitelisted .IsWinboxAllowed}}
-    <button type="button" class="isp-select-card"
-            data-action="unwhitelist"
-            hx-post="/ui/unwhitelist"
-            hx-include="#whitelist-form"
-            hx-target="#hero-client-card"
-            hx-swap="outerHTML"
-            hx-confirm="Apakah Anda yakin ingin menghapus IP {{.ClientIP}} dari whitelist MikroTik?">
-      <div class="card-icon-box" style="background: #fef2f2; color: var(--danger-color);">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="3 6 5 6 21 6"/>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-        </svg>
-      </div>
-      <div class="card-text">
-        <span class="card-title">Hapus Whitelist</span>
-        <span class="card-sub">Cabut akses firewall & Winbox</span>
-      </div>
-      <span class="card-action-btn" style="color: var(--danger-color);">Hapus Akses</span>
-    </button>
-    {{end}}
-  </div>
-
-  <!-- Dedicated Address List Status Card (Find address list nomor IP target) -->
-  <div class="address-list-status-card" id="address-list-card">
-    <div class="status-card-header">
-      <div class="status-header-title">
-        <div class="status-header-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- CARD 2: STANDALONE ADDRESS LIST STATUS CARD (Kartu Bawah Terpisah) -->
+  <div class="address-status-standalone-card address-list-status-card" id="address-list-card">
+    <div class="as-header">
+      <div class="as-header-left">
+        <div class="as-icon-badge">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <rect width="18" height="18" x="3" y="3" rx="2"/>
             <path d="M3 9h18"/>
             <path d="M9 21V9"/>
           </svg>
         </div>
-        <div class="status-header-text">
-          <h4 class="status-main-heading">Status Firewall Address-List</h4>
-          <span class="status-cmd-query" title="Perintah Query MikroTik RouterOS">
-            <code>find where address={{.ClientIP}}</code>
-          </span>
+        <div class="as-header-text">
+          <h3 class="as-title">Status Firewall Address-List</h3>
+          <span class="as-subtitle">Inspeksi langsung via MikroTik RouterOS API</span>
         </div>
       </div>
-      <span class="status-ip-pill" title="IP Target yang diperiksa">IP: {{.ClientIP}}</span>
+
+      <div class="as-header-right">
+        <div class="as-cmd-badge" title="Perintah Query MikroTik RouterOS">
+          <span class="cmd-dot"></span>
+          <code>find where address={{.ClientIP}}</code>
+        </div>
+      </div>
     </div>
 
-    <div class="address-cards-grid status-list-grid">
-      <!-- 1. remote-whitelist (White List) -->
-      <div class="addr-card status-list-item {{if .IsWhitelisted}}card-active active-item{{else}}card-inactive inactive-item{{end}}">
-        <div class="addr-card-header">
-          <div class="addr-title-group">
-            <span class="addr-status-dot status-indicator-dot {{if .IsWhitelisted}}dot-active{{else}}dot-inactive{{end}}"></span>
-            <span class="addr-list-title status-list-title">{{if .WhitelistListName}}{{.WhitelistListName}}{{else}}remote-whitelist{{end}}</span>
+    <!-- Visual Status Panels Grid -->
+    <div class="as-panels-grid status-list-grid">
+      
+      <!-- Panel 1: remote-whitelist (White List) -->
+      <div class="as-panel addr-card status-list-item {{if .IsWhitelisted}}panel-whitelisted card-active active-item{{else}}panel-unwhitelisted card-inactive inactive-item{{end}}">
+        <div class="as-panel-top addr-card-header">
+          <div class="as-panel-identity addr-title-group">
+            <div class="as-panel-icon {{if .IsWhitelisted}}icon-green{{else}}icon-gray{{end}}">
+              {{if .IsWhitelisted}}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <path d="m9 12 2 2 4-4"/>
+              </svg>
+              {{else}}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <line x1="12" x2="12" y1="8" y2="12"/>
+                <line x1="12" x2="12.01" y1="16" y2="16"/>
+              </svg>
+              {{end}}
+            </div>
+            <div class="as-panel-titles">
+              <span class="as-list-name addr-list-title status-list-title">{{if .WhitelistListName}}{{.WhitelistListName}}{{else}}remote-whitelist{{end}}</span>
+              <span class="as-list-role">Daftar Whitelist Akses Remote</span>
+            </div>
           </div>
-          <span class="addr-pill-badge status-badge-pill {{if .IsWhitelisted}}pill-green badge-pill-green{{else}}pill-gray badge-pill-gray{{end}}">
-            {{if .IsWhitelisted}}TERDAFTAR (WHITELIST){{else}}TIDAK TERDAFTAR{{end}}
-          </span>
+          
+          <div class="as-badge addr-pill-badge status-badge-pill {{if .IsWhitelisted}}badge-active pill-green badge-pill-green{{else}}badge-inactive pill-gray badge-pill-gray{{end}}">
+            <span class="badge-dot status-indicator-dot {{if .IsWhitelisted}}dot-pulsing dot-active{{else}}dot-inactive{{end}}"></span>
+            <span>{{if .IsWhitelisted}}TERDAFTAR (WHITELIST){{else}}TIDAK TERDAFTAR{{end}}</span>
+          </div>
         </div>
 
-        <div class="addr-card-rows">
-          <div class="addr-row">
-            <span class="row-label">Status Akses</span>
-            <span class="row-val {{if .IsWhitelisted}}val-green{{end}}">
-              {{if .IsWhitelisted}}Aktif Diizinkan{{else}}Belum Terdaftar{{end}}
+        <div class="as-metrics-row addr-card-rows">
+          <div class="as-metric-tile addr-row">
+            <div class="metric-top row-label">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <span>Akses Firewall</span>
+            </div>
+            <span class="metric-val row-val {{if .IsWhitelisted}}val-success val-green{{else}}val-muted{{end}}">
+              {{if .IsWhitelisted}}Diizinkan{{else}}Terkunci{{end}}
             </span>
           </div>
-          <div class="addr-row">
-            <span class="row-label">Sisa Waktu</span>
-            <span class="row-val mono">{{if and .IsWhitelisted .Timeout}}{{.Timeout}}{{else}}-{{end}}</span>
+
+          <div class="as-metric-tile addr-row">
+            <div class="metric-top row-label">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span>Sisa Waktu</span>
+            </div>
+            <span class="metric-val row-val mono {{if .IsWhitelisted}}val-highlight{{end}}">
+              {{if and .IsWhitelisted .Timeout}}{{.Timeout}}{{else}}-{{end}}
+            </span>
           </div>
-          <div class="addr-row">
-            <span class="row-label">Komentar</span>
-            <span class="row-val mono">{{if and .IsWhitelisted .Comment}}{{.Comment}}{{else}}-{{end}}</span>
+
+          <div class="as-metric-tile addr-row">
+            <div class="metric-top row-label">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" x2="7.01" y1="7" y2="7"/></svg>
+              <span>Komentar</span>
+            </div>
+            <span class="metric-val row-val mono metric-tag" title="{{if and .IsWhitelisted .Comment}}{{.Comment}}{{else}}-{{end}}">
+              {{if and .IsWhitelisted .Comment}}{{.Comment}}{{else}}-{{end}}
+            </span>
           </div>
         </div>
       </div>
 
-      <!-- 2. port-forward-abuse (Abuse List) -->
-      <div class="addr-card status-list-item {{if .IsInAbuseList}}card-danger abuse-item{{else}}card-clean clean-item{{end}}">
-        <div class="addr-card-header">
-          <div class="addr-title-group">
-            <span class="addr-status-dot status-indicator-dot {{if .IsInAbuseList}}dot-danger{{else}}dot-clean dot-active{{end}}"></span>
-            <span class="addr-list-title status-list-title">{{if .AbuseListName}}{{.AbuseListName}}{{else}}port-forward-abuse{{end}}</span>
+      <!-- Panel 2: port-forward-abuse (Abuse List) -->
+      <div class="as-panel addr-card status-list-item {{if .IsInAbuseList}}panel-abused card-danger abuse-item{{else}}panel-clean card-clean clean-item{{end}}">
+        <div class="as-panel-top addr-card-header">
+          <div class="as-panel-identity addr-title-group">
+            <div class="as-panel-icon {{if .IsInAbuseList}}icon-red{{else}}icon-blue{{end}}">
+              {{if .IsInAbuseList}}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/>
+                <line x1="12" x2="12" y1="8" y2="12"/>
+                <line x1="12" x2="12.01" y1="16" y2="16"/>
+              </svg>
+              {{else}}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <path d="m9 12 2 2 4-4"/>
+              </svg>
+              {{end}}
+            </div>
+            <div class="as-panel-titles">
+              <span class="as-list-name addr-list-title status-list-title">{{if .AbuseListName}}{{.AbuseListName}}{{else}}port-forward-abuse{{end}}</span>
+              <span class="as-list-role">Daftar Deteksi Abuse / Serangan</span>
+            </div>
           </div>
-          <span class="addr-pill-badge status-badge-pill {{if .IsInAbuseList}}pill-red badge-pill-red{{else}}pill-clean badge-pill-clean{{end}}">
-            {{if .IsInAbuseList}}TERDETEKSI ABUSE{{else}}BERSIH (NORMAL){{end}}
-          </span>
+          
+          <div class="as-badge addr-pill-badge status-badge-pill {{if .IsInAbuseList}}badge-danger pill-red badge-pill-red{{else}}badge-clean pill-clean badge-pill-clean{{end}}">
+            <span class="badge-dot status-indicator-dot {{if .IsInAbuseList}}dot-danger-pulsing dot-danger{{else}}dot-clean dot-active{{end}}"></span>
+            <span>{{if .IsInAbuseList}}TERDETEKSI ABUSE{{else}}BERSIH (NORMAL){{end}}</span>
+          </div>
         </div>
 
-        <div class="addr-card-rows">
-          <div class="addr-row">
-            <span class="row-label">Status Abuse</span>
-            <span class="row-val {{if .IsInAbuseList}}val-red{{else}}val-clean{{end}}">
+        <div class="as-metrics-row addr-card-rows">
+          <div class="as-metric-tile addr-row">
+            <div class="metric-top row-label">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <span>Status Keamanan</span>
+            </div>
+            <span class="metric-val row-val {{if .IsInAbuseList}}val-danger val-red{{else}}val-success val-clean{{end}}">
               {{if .IsInAbuseList}}Terblokir Abuse{{else}}Bersih / Normal{{end}}
             </span>
           </div>
-          <div class="addr-row">
-            <span class="row-label">Sisa Waktu</span>
-            <span class="row-val mono">{{if and .IsInAbuseList .AbuseTimeout}}{{.AbuseTimeout}}{{else}}-{{end}}</span>
+
+          <div class="as-metric-tile addr-row">
+            <div class="metric-top row-label">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span>Sisa Waktu</span>
+            </div>
+            <span class="metric-val row-val mono {{if .IsInAbuseList}}val-danger val-red{{end}}">
+              {{if and .IsInAbuseList .AbuseTimeout}}{{.AbuseTimeout}}{{else}}-{{end}}
+            </span>
           </div>
-          <div class="addr-row">
-            <span class="row-label">Komentar</span>
-            <span class="row-val mono">{{if and .IsInAbuseList .AbuseComment}}{{.AbuseComment}}{{else}}-{{end}}</span>
+
+          <div class="as-metric-tile addr-row">
+            <div class="metric-top row-label">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" x2="7.01" y1="7" y2="7"/></svg>
+              <span>Komentar</span>
+            </div>
+            <span class="metric-val row-val mono metric-tag" title="{{if and .IsInAbuseList .AbuseComment}}{{.AbuseComment}}{{else}}-{{end}}">
+              {{if and .IsInAbuseList .AbuseComment}}{{.AbuseComment}}{{else}}-{{end}}
+            </span>
           </div>
         </div>
       </div>
+
     </div>
   </div>
 </div>
