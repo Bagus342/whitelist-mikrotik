@@ -39,7 +39,7 @@
 
     <div class="hero-card-divider"></div>
 
-    <!-- Action Switch Grid -->
+    <!-- Row 1: Action Switch Grid (2 Columns) -->
     <div class="switch-grid">
       <!-- Whitelist Action Card -->
       <button type="button" class="isp-select-card oxygen-card {{if .IsWhitelisted}}active-oxygen{{end}}"
@@ -87,9 +87,12 @@
         </div>
         <span class="card-action-btn">{{if .IsWinboxAllowed}}Cabut Winbox{{else}}Izinkan Winbox{{end}}</span>
       </button>
+    </div>
 
-      <!-- Card Status Port-Forwarder-Abuse (Merge 2 Column) -->
-      <div class="isp-select-card abuse-card merge-2-col {{if .IsInAbuseList}}active-abuse{{else}}clean-abuse{{end}}" id="port-abuse-card">
+    <!-- Row 2 (Bawah): 1 Column Full Width -->
+    <div class="bottom-grid-single">
+      <!-- Card Status Port-Forwarder-Abuse (Full Width) -->
+      <div class="isp-select-card abuse-card full-width-card {{if .IsInAbuseList}}active-abuse{{else}}clean-abuse{{end}}" id="port-abuse-card">
         <div class="card-icon-box {{if .IsInAbuseList}}abuse-box-danger{{else}}abuse-box-clean{{end}}">
           {{if .IsInAbuseList}}
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -121,7 +124,7 @@
 
       <!-- Remove Whitelist Card -->
       {{if or .IsWhitelisted .IsWinboxAllowed}}
-      <button type="button" class="isp-select-card merge-2-col"
+      <button type="button" class="isp-select-card full-width-card"
               data-action="unwhitelist"
               hx-post="/ui/unwhitelist"
               hx-include="#whitelist-form"

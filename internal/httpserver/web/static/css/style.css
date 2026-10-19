@@ -399,15 +399,30 @@ body {
   margin: 24px 0;
 }
 
-/* Switch Grid Cards */
+/* Switch Grid Cards (Row 1: 2 Columns) */
 .switch-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 16px;
 }
 
+/* Bottom Grid / Stack (Row 2: 1 Column Full Width) */
+.bottom-grid-single {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+  width: 100%;
+}
+
+.full-width-card {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .merge-2-col {
-  grid-column: span 2;
+  grid-column: 1 / -1;
+  width: 100%;
 }
 
 .isp-select-card {
@@ -1200,6 +1215,11 @@ body {
   .switch-grid {
     grid-template-columns: 1fr;
     gap: 12px;
+  }
+
+  .bottom-grid-single {
+    gap: 12px;
+    margin-top: 12px;
   }
 
   .merge-2-col {
