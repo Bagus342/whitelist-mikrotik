@@ -101,6 +101,21 @@ func TestWebUI_IndexDashboard(t *testing.T) {
 	if !strings.Contains(body, "switching-modal-overlay") {
 		t.Errorf("expected body to include switching overlay modal")
 	}
+	if !strings.Contains(body, "address-list-status-card") {
+		t.Errorf("expected body to include address-list-status-card")
+	}
+	if !strings.Contains(body, "find where address=203.0.113.88") {
+		t.Errorf("expected body to include find address list query command")
+	}
+	if !strings.Contains(body, "remote-whitelist") {
+		t.Errorf("expected body to include remote-whitelist list name")
+	}
+	if !strings.Contains(body, "port-forward-abuse") {
+		t.Errorf("expected body to include port-forward-abuse list name")
+	}
+	if !strings.Contains(body, "BERSIH (NORMAL)") {
+		t.Errorf("expected abuse status to show 'BERSIH (NORMAL)' for clean IP")
+	}
 }
 
 func TestWebUI_UIStatus(t *testing.T) {
@@ -128,6 +143,42 @@ func TestWebUI_UIStatus(t *testing.T) {
 	}
 	if !strings.Contains(body, "Perpanjang Whitelist") {
 		t.Errorf("expected body to have 'Perpanjang Whitelist' button")
+	}
+	if !strings.Contains(body, "address-list-status-card") {
+		t.Errorf("expected body to include address-list-status-card")
+	}
+	if !strings.Contains(body, "TERDAFTAR (WHITELIST)") {
+		t.Errorf("expected address-list card to show 'TERDAFTAR (WHITELIST)'")
+	}
+}
+
+func TestWebUI_AddressListStatusCard_Abuse(t *testing.T) {
+	_, mockMk, router := setupTestServer()
+
+	abuseIP := "203.0.113.77"
+	mockMk.AddAbuseEntry(abuseIP)
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/status?ip="+abuseIP, nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on /ui/status for abuse IP, got %d: %s", w.Code, w.Body.String())
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "address-list-status-card") {
+		t.Errorf("expected body to contain address-list-status-card")
+	}
+	if !strings.Contains(body, "port-forward-abuse") {
+		t.Errorf("expected body to contain port-forward-abuse")
+	}
+	if !strings.Contains(body, "TERDETEKSI ABUSE") {
+		t.Errorf("expected body to show 'TERDETEKSI ABUSE', got: %s", body)
+	}
+	if !strings.Contains(body, "TIDAK TERDAFTAR") {
+		t.Errorf("expected whitelist item to show 'TIDAK TERDAFTAR', got: %s", body)
 	}
 }
 

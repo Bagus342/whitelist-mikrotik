@@ -73,15 +73,17 @@ func (h *Handler) getStatusOrFallback(r *http.Request, targetIP string) *mikroti
 	if err != nil {
 		h.logger.Warn("mikrotik get status failed, returning fallback telemetry", "ip", targetIP, "error", err)
 		status = &mikrotik.StatusResult{
-			ClientIP:         targetIP,
-			Hostname:         targetIP,
-			IsWhitelisted:    false,
-			IsInAbuseList:    false,
-			IsWinboxAllowed:  false,
-			TotalWhitelisted: 0,
-			WhitelistTTL:     "8h",
-			MikrotikAddress:  "MikroTik (Connecting...)",
-			Entries:          []mikrotik.EntryResult{},
+			ClientIP:          targetIP,
+			Hostname:          targetIP,
+			IsWhitelisted:     false,
+			IsInAbuseList:     false,
+			WhitelistListName: "remote-whitelist",
+			AbuseListName:     "port-forward-abuse",
+			IsWinboxAllowed:   false,
+			TotalWhitelisted:  0,
+			WhitelistTTL:      "8h",
+			MikrotikAddress:   "MikroTik (Connecting...)",
+			Entries:           []mikrotik.EntryResult{},
 		}
 	}
 	if status.ISP == "" {

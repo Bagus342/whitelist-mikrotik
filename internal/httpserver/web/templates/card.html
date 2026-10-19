@@ -109,4 +109,76 @@
     </button>
     {{end}}
   </div>
+
+  <!-- Dedicated Address List Status Card (Find address list nomor IP target) -->
+  <div class="address-list-status-card" id="address-list-card">
+    <div class="status-card-header">
+      <div class="status-header-title">
+        <div class="status-header-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="18" height="18" x="3" y="3" rx="2"/>
+            <path d="M3 9h18"/>
+            <path d="M9 21V9"/>
+          </svg>
+        </div>
+        <div class="status-header-text">
+          <h4 class="status-main-heading">Status Firewall Address-List</h4>
+          <span class="status-cmd-query" title="Perintah Query MikroTik RouterOS">
+            <code>find where address={{.ClientIP}}</code>
+          </span>
+        </div>
+      </div>
+      <span class="status-ip-pill" title="IP Target yang diperiksa">IP: {{.ClientIP}}</span>
+    </div>
+
+    <div class="status-list-grid">
+      <!-- 1. remote-whitelist (White List) -->
+      <div class="status-list-item {{if .IsWhitelisted}}active-item{{else}}inactive-item{{end}}">
+        <div class="status-item-left">
+          <span class="status-indicator-dot {{if .IsWhitelisted}}dot-active{{else}}dot-inactive{{end}}"></span>
+          <div class="status-item-details">
+            <div class="status-item-heading">
+              <span class="status-list-title">{{if .WhitelistListName}}{{.WhitelistListName}}{{else}}remote-whitelist{{end}}</span>
+              <span class="status-badge-pill {{if .IsWhitelisted}}badge-pill-green{{else}}badge-pill-gray{{end}}">
+                {{if .IsWhitelisted}}TERDAFTAR (WHITELIST){{else}}TIDAK TERDAFTAR{{end}}
+              </span>
+            </div>
+            <p class="status-item-sub">
+              {{if .IsWhitelisted}}
+                Izin akses firewall aktif.
+                {{if .Timeout}}<span class="status-sub-highlight">Sisa Waktu: <strong>{{.Timeout}}</strong></span>{{end}}
+                {{if .Comment}}<span class="status-sub-highlight">Komentar: <code>{{.Comment}}</code></span>{{end}}
+              {{else}}
+                IP belum terdaftar di whitelist akses remote MikroTik.
+              {{end}}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. port-forward-abuse (Abuse List) -->
+      <div class="status-list-item {{if .IsInAbuseList}}abuse-item{{else}}clean-item{{end}}">
+        <div class="status-item-left">
+          <span class="status-indicator-dot {{if .IsInAbuseList}}dot-danger{{else}}dot-active{{end}}"></span>
+          <div class="status-item-details">
+            <div class="status-item-heading">
+              <span class="status-list-title">{{if .AbuseListName}}{{.AbuseListName}}{{else}}port-forward-abuse{{end}}</span>
+              <span class="status-badge-pill {{if .IsInAbuseList}}badge-pill-red{{else}}badge-pill-clean{{end}}">
+                {{if .IsInAbuseList}}TERDETEKSI ABUSE{{else}}BERSIH (NORMAL){{end}}
+              </span>
+            </div>
+            <p class="status-item-sub">
+              {{if .IsInAbuseList}}
+                <strong style="color: var(--danger-color);">Terdeteksi Abuse:</strong> IP ini masuk dalam daftar blokir port-forward-abuse. Pendaftaran whitelist akan otomatis membersihkan IP dari daftar ini.
+                {{if .AbuseTimeout}}<span class="status-sub-highlight">Timeout: <strong>{{.AbuseTimeout}}</strong></span>{{end}}
+                {{if .AbuseComment}}<span class="status-sub-highlight">Komentar: <code>{{.AbuseComment}}</code></span>{{end}}
+              {{else}}
+                IP aman dan tidak tercatat dalam daftar blokir port-forward-abuse MikroTik.
+              {{end}}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>

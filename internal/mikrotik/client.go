@@ -51,9 +51,13 @@ type StatusResult struct {
 	IsWhitelisted    bool          `json:"is_whitelisted"`
 	Comment          string        `json:"comment,omitempty"`
 	Timeout          string        `json:"timeout,omitempty"`
-	ExpiresAt        time.Time     `json:"expires_at,omitempty"`
-	IsInAbuseList    bool          `json:"is_in_abuse_list"`
-	IsWinboxAllowed  bool          `json:"is_winbox_allowed"`
+	ExpiresAt         time.Time     `json:"expires_at,omitempty"`
+	IsInAbuseList     bool          `json:"is_in_abuse_list"`
+	AbuseComment      string        `json:"abuse_comment,omitempty"`
+	AbuseTimeout      string        `json:"abuse_timeout,omitempty"`
+	WhitelistListName string        `json:"whitelist_list_name,omitempty"`
+	AbuseListName     string        `json:"abuse_list_name,omitempty"`
+	IsWinboxAllowed   bool          `json:"is_winbox_allowed"`
 	TotalWhitelisted int           `json:"total_whitelisted"`
 	WhitelistTTL     string        `json:"whitelist_ttl"`
 	MikrotikAddress  string        `json:"mikrotik_address"`
@@ -877,7 +881,13 @@ func (c *RouterOSClient) ListEntries(ctx context.Context) ([]EntryResult, error)
 // GetStatus returns the current whitelist status, abuse status, and winbox status for a given client IP.
 func (c *RouterOSClient) GetStatus(ctx context.Context, ip string) (*StatusResult, error) {
 	listName := c.cfg.WhitelistListName
+	if listName == "" {
+		listName = "remote-whitelist"
+	}
 	abuseListName := c.cfg.PortForwardAbuseListName
+	if abuseListName == "" {
+		abuseListName = "port-forward-abuse"
+	}
 
 	// 1. Query whitelist entries for this IP
 	wlEntries, err := c.findEntries(ctx, listName, ip)
@@ -895,9 +905,15 @@ func (c *RouterOSClient) GetStatus(ctx context.Context, ip string) (*StatusResul
 
 	// 2. Query abuse entries for this IP
 	inAbuse := false
+	abuseComment := ""
+	abuseTimeout := ""
 	if strings.TrimSpace(abuseListName) != "" {
 		if abuseEntries, aErr := c.findEntries(ctx, abuseListName, ip); aErr == nil {
 			inAbuse = len(abuseEntries) > 0
+			if inAbuse {
+				abuseComment = abuseEntries[0].comment
+				abuseTimeout = abuseEntries[0].timeout
+			}
 		}
 	}
 
@@ -930,18 +946,22 @@ func (c *RouterOSClient) GetStatus(ctx context.Context, ip string) (*StatusResul
 	routerAddr := fmt.Sprintf("%s:%d", c.cfg.MikrotikHost, c.cfg.MikrotikPort)
 
 	return &StatusResult{
-		ClientIP:         ip,
-		Hostname:         hostname,
-		ISP:              isp,
-		IsWhitelisted:    isWhitelisted,
-		Comment:          comment,
-		Timeout:          timeout,
-		IsInAbuseList:    inAbuse,
-		IsWinboxAllowed:  isWinboxAllowed,
-		TotalWhitelisted: totalWhitelisted,
-		WhitelistTTL:     c.cfg.WhitelistTTL,
-		MikrotikAddress:  routerAddr,
-		Entries:          allEntries,
+		ClientIP:          ip,
+		Hostname:          hostname,
+		ISP:               isp,
+		IsWhitelisted:     isWhitelisted,
+		Comment:           comment,
+		Timeout:           timeout,
+		IsInAbuseList:     inAbuse,
+		AbuseComment:      abuseComment,
+		AbuseTimeout:      abuseTimeout,
+		WhitelistListName: listName,
+		AbuseListName:     abuseListName,
+		IsWinboxAllowed:   isWinboxAllowed,
+		TotalWhitelisted:  totalWhitelisted,
+		WhitelistTTL:      c.cfg.WhitelistTTL,
+		MikrotikAddress:   routerAddr,
+		Entries:           allEntries,
 	}, nil
 }
 

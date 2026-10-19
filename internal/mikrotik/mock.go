@@ -249,7 +249,13 @@ func (m *MockClient) GetStatus(ctx context.Context, ip string) (*StatusResult, e
 		}
 	}
 
-	_, inAbuse := m.AbuseEntries[ip]
+	abuseEntry, inAbuse := m.AbuseEntries[ip]
+	abuseComment := ""
+	abuseTimeout := ""
+	if inAbuse {
+		abuseComment = abuseEntry.Comment
+		abuseTimeout = abuseEntry.Timeout
+	}
 	isWinboxAllowed := m.hasWinboxAddressLocked(ip)
 
 	var allEntries []EntryResult
@@ -272,19 +278,23 @@ func (m *MockClient) GetStatus(ctx context.Context, ip string) (*StatusResult, e
 	}
 
 	return &StatusResult{
-		ClientIP:         ip,
-		Hostname:         hostname,
-		ISP:              DetectISP(ctx, ip),
-		IsWhitelisted:    isWhitelisted,
-		Comment:          comment,
-		Timeout:          timeout,
-		ExpiresAt:        expiresAt,
-		IsInAbuseList:    inAbuse,
-		IsWinboxAllowed:  isWinboxAllowed,
-		TotalWhitelisted: len(m.Entries),
-		WhitelistTTL:     "8h",
-		MikrotikAddress:  "192.168.48.1:8728",
-		Entries:          allEntries,
+		ClientIP:          ip,
+		Hostname:          hostname,
+		ISP:               DetectISP(ctx, ip),
+		IsWhitelisted:     isWhitelisted,
+		Comment:           comment,
+		Timeout:           timeout,
+		ExpiresAt:         expiresAt,
+		IsInAbuseList:     inAbuse,
+		AbuseComment:      abuseComment,
+		AbuseTimeout:      abuseTimeout,
+		WhitelistListName: "remote-whitelist",
+		AbuseListName:     "port-forward-abuse",
+		IsWinboxAllowed:   isWinboxAllowed,
+		TotalWhitelisted:  len(m.Entries),
+		WhitelistTTL:      "8h",
+		MikrotikAddress:   "192.168.48.1:8728",
+		Entries:           allEntries,
 	}, nil
 }
 
