@@ -15,6 +15,7 @@ import (
 	"whitelist-mikrotik/internal/auth"
 	"whitelist-mikrotik/internal/ipcheck"
 	"whitelist-mikrotik/internal/mikrotik"
+	"whitelist-mikrotik/internal/oidc"
 )
 
 // Handler contains dependencies for handling HTTP requests.
@@ -27,6 +28,12 @@ type Handler struct {
 	adminUser       string
 	adminPass       string
 	authBearerToken string
+
+	// Authentik / OIDC single sign-on (nil when disabled)
+	oidc               *oidc.Provider
+	oidcCallbackPath   string
+	oidcPending        *pendingAuthStore
+	localLoginDisabled bool
 }
 
 // NewHandler constructs a new Handler.
@@ -471,6 +478,12 @@ func SetupRouter(h *Handler, authBearerToken string, logger *slog.Logger) http.H
 	})
 	mux.HandleFunc("/ui/login", h.HandleLoginSubmit)
 	mux.HandleFunc("/ui/logout", h.HandleLogout)
+
+	// Authentik (OIDC) single sign-on
+	if h.oidc != nil {
+		mux.HandleFunc("/auth/login", h.HandleOIDCLogin)
+		mux.HandleFunc(h.oidcCallbackPath, h.HandleOIDCCallback)
+	}
 
 	// Web UI Dashboard & HTMX endpoints (protected by session / bearer auth)
 	mux.Handle("/", webAuth(http.HandlerFunc(h.HandleIndex)))

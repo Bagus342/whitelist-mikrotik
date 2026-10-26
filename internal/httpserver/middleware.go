@@ -320,7 +320,7 @@ func (h *Handler) WebAuthMiddleware(authBearerToken string) func(http.Handler) h
 			expectedPass := strings.TrimSpace(h.adminPass)
 
 			// If no authentication is configured, allow all requests
-			if expectedToken == "" && expectedPass == "" {
+			if !h.authRequired() {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -352,7 +352,7 @@ func (h *Handler) WebAuthMiddleware(authBearerToken string) func(http.Handler) h
 				if expectedToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(expectedToken)) == 1 {
 					match = true
 				}
-				if !match && expectedPass != "" && auth.VerifyPassword(token, expectedPass) {
+				if !match && expectedPass != "" && !h.localLoginDisabled && auth.VerifyPassword(token, expectedPass) {
 					match = true
 				}
 
@@ -394,10 +394,7 @@ func (h *Handler) WebAuthMiddleware(authBearerToken string) func(http.Handler) h
 					csrfToken := h.getOrCreatePreLoginCSRF(w, r)
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")
 					w.WriteHeader(http.StatusUnauthorized)
-					_ = loginTmpl.Execute(w, map[string]any{
-						"Username":  h.adminUser,
-						"CSRFToken": csrfToken,
-					})
+					_ = loginTmpl.Execute(w, h.loginViewData("", "", csrfToken))
 					return
 				}
 				http.Redirect(w, r, "/login", http.StatusSeeOther)

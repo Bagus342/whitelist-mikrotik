@@ -50,6 +50,7 @@ Layanan HTTP sederhana, aman, dan *production-ready* yang dibangun dengan Go unt
 │   ├── config/               # Parser & validator konfigurasi env
 │   ├── httpserver/           # HTTP router, middleware, handlers & unit tests
 │   ├── ipcheck/              # Validasi IP dan filter subnet terlarang
+│   ├── oidc/                 # Client OpenID Connect (SSO Authentik)
 │   └── mikrotik/             # Client RouterOS API v7 & mock untuk testing
 ├── scripts/
 │   ├── wl.sh                 # Helper script Bash (Linux/macOS)
@@ -85,6 +86,37 @@ cp .env.example .env
 | `OFFICE_PUBLIC_IPS` | String | `""` | Tidak | Daftar IP atau subnet publik kantor (dipisahkan koma) untuk ditolak agar tidak sengaja di-whitelist. |
 | `ALLOW_IPV6` | Boolean | `false` | Tidak | Set `true` untuk mengizinkan alamat IPv6 publik. |
 | `TZ` | String | `Asia/Jakarta` | Tidak | Zona waktu untuk kalkulasi timestamp kedaluwarsa. |
+| `AUTHENTIK_ISSUER_URL` | String | `""` | Tidak | URL issuer OIDC Authentik. Jika diisi, SSO Authentik aktif. |
+| `AUTHENTIK_CLIENT_ID` | String | - | Ya (jika SSO) | Client ID dari provider OAuth2/OpenID di Authentik. |
+| `AUTHENTIK_CLIENT_SECRET` | String | `""` | Tidak | Client Secret (wajib untuk client type *Confidential*). |
+| `AUTHENTIK_REDIRECT_URL` | String | - | Ya (jika SSO) | URL callback publik, contoh `https://wl.example.com/auth/callback`. |
+| `AUTHENTIK_SCOPES` | String | `openid profile email` | Tidak | Scope OIDC (dipisah spasi/koma). |
+| `AUTHENTIK_ALLOWED_GROUPS` | String | `""` | Tidak | Grup Authentik yang diizinkan (dipisah koma). Kosong = semua user yang lolos policy Authentik. |
+| `AUTHENTIK_POST_LOGOUT_URL` | String | `""` | Tidak | URL tujuan setelah logout dari Authentik, contoh `https://wl.example.com/login`. |
+| `AUTHENTIK_DISABLE_LOCAL_LOGIN` | Boolean | `false` | Tidak | `true` = sembunyikan form login lokal, hanya SSO. `AUTH_BEARER_TOKEN` untuk API tetap berlaku. |
+
+### Integrasi SSO Authentik (OpenID Connect)
+
+Login Web UI dapat didelegasikan ke [Authentik](https://goauthentik.io) memakai OIDC Authorization Code Flow + PKCE. Token `id_token` diverifikasi (signature RS256/ES256/HS256 via JWKS, `iss`, `aud`, `exp`, `nonce`), lalu layanan membuat sesi lokal seperti login biasa.
+
+1. Di Authentik: **Applications → Providers → Create → OAuth2/OpenID Provider**
+   - Client type: `Confidential`
+   - Redirect URIs: `https://wl.example.com/auth/callback` (harus sama persis dengan `AUTHENTIK_REDIRECT_URL`)
+   - Signing Key: pilih sertifikat (mis. `authentik Self-signed Certificate`) agar token ditandatangani RS256
+   - Scopes: `openid`, `email`, `profile` (scope `profile` bawaan Authentik sudah menyertakan claim `groups`)
+2. Buat **Application** yang memakai provider tersebut, slug misalnya `wlservice`. Atur akses dengan *Policy/Group binding* bila perlu.
+3. Isi `.env`:
+   ```bash
+   AUTHENTIK_ISSUER_URL=https://auth.example.com/application/o/wlservice/
+   AUTHENTIK_CLIENT_ID=xxxxxxxx
+   AUTHENTIK_CLIENT_SECRET=xxxxxxxx
+   AUTHENTIK_REDIRECT_URL=https://wl.example.com/auth/callback
+   AUTHENTIK_ALLOWED_GROUPS=network-admins
+   AUTHENTIK_POST_LOGOUT_URL=https://wl.example.com/login
+   ```
+4. Halaman `/login` akan menampilkan tombol **Masuk dengan Authentik (SSO)**. Logout dari portal juga mengakhiri sesi di Authentik (RP-initiated logout).
+
+Endpoint: `GET /auth/login` (mulai SSO) dan path dari `AUTHENTIK_REDIRECT_URL` (callback, default `/auth/callback`). Pastikan reverse proxy meneruskan header `X-Forwarded-Proto: https` agar cookie diset `Secure`.
 
 ---
 

@@ -150,6 +150,10 @@ type Session struct {
 	ClientIP  string
 	UserAgent string
 	CSRFToken string
+	// AuthMethod is "local" for password/token logins or "oidc" for Authentik SSO.
+	AuthMethod string
+	// IDToken is the raw OIDC id_token, kept as id_token_hint for SSO logout.
+	IDToken   string
 	CreatedAt time.Time
 	ExpiresAt time.Time
 }
@@ -185,6 +189,15 @@ func NewSessionStore(ttl time.Duration) *SessionStore {
 
 // CreateSession generates a new cryptographically secure session ID and CSRF token.
 func (s *SessionStore) CreateSession(username, clientIP, userAgent string) (*Session, error) {
+	return s.createSession(username, clientIP, userAgent, "local", "")
+}
+
+// CreateOIDCSession creates a session for a user authenticated via OIDC SSO.
+func (s *SessionStore) CreateOIDCSession(username, clientIP, userAgent, idToken string) (*Session, error) {
+	return s.createSession(username, clientIP, userAgent, "oidc", idToken)
+}
+
+func (s *SessionStore) createSession(username, clientIP, userAgent, authMethod, idToken string) (*Session, error) {
 	// 256-bit (32 bytes) cryptographically random session ID
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -201,13 +214,15 @@ func (s *SessionStore) CreateSession(username, clientIP, userAgent string) (*Ses
 
 	now := time.Now()
 	sess := &Session{
-		ID:        sessionID,
-		Username:  username,
-		ClientIP:  clientIP,
-		UserAgent: userAgent,
-		CSRFToken: csrfToken,
-		CreatedAt: now,
-		ExpiresAt: now.Add(s.ttl),
+		ID:         sessionID,
+		Username:   username,
+		ClientIP:   clientIP,
+		UserAgent:  userAgent,
+		CSRFToken:  csrfToken,
+		AuthMethod: authMethod,
+		IDToken:    idToken,
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(s.ttl),
 	}
 
 	s.mu.Lock()

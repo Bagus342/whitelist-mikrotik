@@ -405,11 +405,7 @@ func (h *Handler) HandleLoginPage(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}
 
-	_ = loginTmpl.Execute(w, map[string]any{
-		"Username":     h.adminUser,
-		"ErrorMessage": errMsg,
-		"CSRFToken":    csrfToken,
-	})
+	_ = loginTmpl.Execute(w, h.loginViewData("", errMsg, csrfToken))
 }
 
 // HandleLoginSubmit processes login credentials and issues session cookies.
@@ -421,16 +417,19 @@ func (h *Handler) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 
 	clientIP := extractSourceIP(r)
 
+	if h.localLoginDisabled {
+		h.renderLoginError(w, r, http.StatusForbidden, "Login lokal dinonaktifkan. Gunakan tombol Masuk dengan Authentik.")
+		return
+	}
+
 	// 1. Rate limiter / brute force check
 	if isLocked, remaining := h.rateLimiter.CheckLimit(clientIP); isLocked {
 		h.logger.Warn("login attempt from locked IP", "ip", clientIP)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusTooManyRequests)
-		_ = loginTmpl.Execute(w, map[string]any{
-			"Username":     h.adminUser,
-			"ErrorMessage": fmt.Sprintf("Terlalu banyak percobaan gagal. IP Anda terkunci selama %d menit.", int(remaining.Minutes())+1),
-			"CSRFToken":    h.getOrCreatePreLoginCSRF(w, r),
-		})
+		_ = loginTmpl.Execute(w, h.loginViewData("",
+			fmt.Sprintf("Terlalu banyak percobaan gagal. IP Anda terkunci selama %d menit.", int(remaining.Minutes())+1),
+			h.getOrCreatePreLoginCSRF(w, r)))
 		return
 	}
 
@@ -446,11 +445,7 @@ func (h *Handler) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("login CSRF verification failed", "ip", clientIP)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusForbidden)
-			_ = loginTmpl.Execute(w, map[string]any{
-				"Username":     h.adminUser,
-				"ErrorMessage": "Token sesi form kedaluwarsa. Silakan muat ulang halaman.",
-				"CSRFToken":    h.getOrCreatePreLoginCSRF(w, r),
-			})
+			_ = loginTmpl.Execute(w, h.loginViewData("", "Token sesi form kedaluwarsa. Silakan muat ulang halaman.", h.getOrCreatePreLoginCSRF(w, r)))
 			return
 		}
 	}
@@ -468,7 +463,7 @@ func (h *Handler) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	expectedPass := strings.TrimSpace(h.adminPass)
 
 	authenticated := false
-	if expectedToken == "" && expectedPass == "" {
+	if expectedToken == "" && expectedPass == "" && h.oidc == nil {
 		authenticated = true
 	} else {
 		expectedUser := h.adminUser
@@ -515,11 +510,7 @@ func (h *Handler) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(status)
-		_ = loginTmpl.Execute(w, map[string]any{
-			"Username":     username,
-			"ErrorMessage": errMsg,
-			"CSRFToken":    h.getOrCreatePreLoginCSRF(w, r),
-		})
+		_ = loginTmpl.Execute(w, h.loginViewData(username, errMsg, h.getOrCreatePreLoginCSRF(w, r)))
 		return
 	}
 
@@ -563,7 +554,14 @@ func (h *Handler) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 
 // HandleLogout revokes the user's session and clears cookies.
 func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	redirectTo := "/login"
 	if cookie, err := r.Cookie("jti_session_id"); err == nil && cookie.Value != "" {
+		// For SSO sessions also end the Authentik session (RP-initiated logout).
+		if sess, err := h.sessionStore.GetSession(cookie.Value); err == nil && sess.AuthMethod == "oidc" && h.oidc != nil {
+			if u := h.oidc.EndSessionURL(r.Context(), sess.IDToken); u != "" {
+				redirectTo = u
+			}
+		}
 		h.sessionStore.RevokeSession(cookie.Value)
 	}
 
@@ -588,5 +586,5 @@ func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		Expires:  time.Unix(0, 0),
 	})
 
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
+	http.Redirect(w, r, redirectTo, http.StatusSeeOther)
 }

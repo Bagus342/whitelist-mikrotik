@@ -5,8 +5,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,9 +16,41 @@ import (
 	"whitelist-mikrotik/internal/httpserver"
 	"whitelist-mikrotik/internal/ipcheck"
 	"whitelist-mikrotik/internal/mikrotik"
+	"whitelist-mikrotik/internal/oidc"
 )
 
+// loadEnvFile reads a local .env file if it exists and sets any environment
+// variables that have not already been set.
+func loadEnvFile(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		if len(val) >= 2 && ((val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'')) {
+			val = val[1 : len(val)-1]
+		}
+		if _, exists := os.LookupEnv(key); !exists {
+			os.Setenv(key, val)
+		}
+	}
+}
+
 func main() {
+	// 0. Auto-load .env file if present in working directory
+	loadEnvFile(".env")
+
 	// 1. Initialize slog JSON logger (default stdout)
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -43,6 +77,23 @@ func main() {
 
 	handler := httpserver.NewHandler(validator, mkClient, logger)
 	handler.SetAuth(cfg.WebAdminUser, cfg.WebAdminPassword)
+	if cfg.AuthentikEnabled() {
+		provider := oidc.NewProvider(oidc.Config{
+			IssuerURL:     cfg.AuthentikIssuerURL,
+			ClientID:      cfg.AuthentikClientID,
+			ClientSecret:  cfg.AuthentikClientSecret,
+			RedirectURL:   cfg.AuthentikRedirectURL,
+			Scopes:        cfg.AuthentikScopes,
+			AllowedGroups: cfg.AuthentikAllowedGroups,
+			PostLogoutURL: cfg.AuthentikPostLogoutURL,
+		})
+		callbackPath := "/auth/callback"
+		if u, err := url.Parse(cfg.AuthentikRedirectURL); err == nil && u.Path != "" && u.Path != "/" {
+			callbackPath = u.Path
+		}
+		handler.SetOIDC(provider, callbackPath, cfg.AuthentikDisableLocalLogin)
+		logger.Info("authentik sso enabled", "issuer", cfg.AuthentikIssuerURL, "callback_path", callbackPath)
+	}
 	router := httpserver.SetupRouter(handler, cfg.AuthBearerToken, logger)
 
 	// 4. Configure http.Server with production timeouts

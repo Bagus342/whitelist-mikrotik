@@ -130,6 +130,34 @@
       color: var(--text-dim);
       text-align: center;
     }
+    .btn-sso {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 12px;
+      font-size: 0.95rem;
+      text-decoration: none;
+      box-sizing: border-box;
+    }
+    .login-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 18px 0 4px;
+      color: var(--text-dim);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .login-divider::before,
+    .login-divider::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--border-color);
+    }
   </style>
 </head>
 <body>
@@ -164,6 +192,19 @@
         </div>
       {{end}}
 
+      {{if .OIDCEnabled}}
+        <a href="/auth/login" class="btn btn-primary btn-sso" id="btn-sso-authentik">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/>
+          </svg>
+          Masuk dengan Authentik (SSO)
+        </a>
+        {{if .LocalLoginEnabled}}
+          <div class="login-divider"><span>atau login lokal</span></div>
+        {{end}}
+      {{end}}
+
+      {{if or (not .OIDCEnabled) .LocalLoginEnabled}}
       <form method="POST" action="/ui/login" class="dialog-form" autocomplete="off">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
 
@@ -197,6 +238,7 @@
           Masuk ke Portal
         </button>
       </form>
+      {{end}}
 
       <div class="security-notice">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
