@@ -223,7 +223,13 @@ func (p *Provider) Exchange(ctx context.Context, code, codeVerifier, nonce strin
 		return nil, "", fmt.Errorf("token response decode failed (status %d): %w", resp.StatusCode, err)
 	}
 	if resp.StatusCode != http.StatusOK || tok.Error != "" {
-		return nil, "", fmt.Errorf("token endpoint error (status %d): %s %s", resp.StatusCode, tok.Error, tok.ErrorDescription)
+		hint := ""
+		if tok.Error == "invalid_client" {
+			// Authentik returns invalid_client both for a wrong secret and for a
+			// redirect_uri that is not registered on the provider.
+			hint = " (check AUTHENTIK_CLIENT_SECRET matches the provider's Client Secret and AUTHENTIK_REDIRECT_URL is listed in its Redirect URIs)"
+		}
+		return nil, "", fmt.Errorf("token endpoint error (status %d): %s%s", resp.StatusCode, tok.Error, hint)
 	}
 	if tok.IDToken == "" {
 		return nil, "", errors.New("token response has no id_token (is the 'openid' scope granted?)")

@@ -76,8 +76,7 @@ func main() {
 	}()
 
 	handler := httpserver.NewHandler(validator, mkClient, logger)
-	handler.SetAuth(cfg.WebAdminUser, cfg.WebAdminPassword)
-	if cfg.AuthentikEnabled() {
+	{
 		provider := oidc.NewProvider(oidc.Config{
 			IssuerURL:     cfg.AuthentikIssuerURL,
 			ClientID:      cfg.AuthentikClientID,
@@ -91,8 +90,11 @@ func main() {
 		if u, err := url.Parse(cfg.AuthentikRedirectURL); err == nil && u.Path != "" && u.Path != "/" {
 			callbackPath = u.Path
 		}
-		handler.SetOIDC(provider, callbackPath, cfg.AuthentikDisableLocalLogin)
-		logger.Info("authentik sso enabled", "issuer", cfg.AuthentikIssuerURL, "callback_path", callbackPath)
+		handler.SetOIDC(provider, callbackPath)
+		logger.Info("authentik sso configured", "issuer", cfg.AuthentikIssuerURL, "callback_path", callbackPath)
+	}
+	if cfg.AuthBearerToken == "" {
+		logger.Warn("AUTH_BEARER_TOKEN is empty: script API /v1/whitelist is disabled")
 	}
 	router := httpserver.SetupRouter(handler, cfg.AuthBearerToken, logger)
 

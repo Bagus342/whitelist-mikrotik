@@ -105,12 +105,11 @@ func (idp *fakeIdP) sign(t *testing.T, claims map[string]any) string {
 	return signed + "." + base64.RawURLEncoding.EncodeToString(sig)
 }
 
-func setupOIDCServer(t *testing.T, idp *fakeIdP, allowedGroups []string, disableLocal bool) (*Handler, http.Handler) {
+func setupOIDCServer(t *testing.T, idp *fakeIdP, allowedGroups []string) (*Handler, http.Handler) {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	validator := ipcheck.NewValidator(false, []netip.Prefix{netip.MustParsePrefix("203.0.113.100/32")})
 	handler := NewHandler(validator, mikrotik.NewMockClient(), logger)
-	handler.SetAuth("admin", "localpass")
 	handler.SetOIDC(oidc.NewProvider(oidc.Config{
 		IssuerURL:     idp.issuer(),
 		ClientID:      idp.clientID,
@@ -118,7 +117,7 @@ func setupOIDCServer(t *testing.T, idp *fakeIdP, allowedGroups []string, disable
 		RedirectURL:   "https://wl.example.com/auth/callback",
 		AllowedGroups: allowedGroups,
 		PostLogoutURL: "https://wl.example.com/login",
-	}), "/auth/callback", disableLocal)
+	}), "/auth/callback")
 	return handler, SetupRouter(handler, "", logger)
 }
 
@@ -171,7 +170,7 @@ func sessionCookie(w *httptest.ResponseRecorder) *http.Cookie {
 
 func TestOIDC_FullLoginAndLogout(t *testing.T) {
 	idp := newFakeIdP(t)
-	handler, router := setupOIDCServer(t, idp, []string{"network-admins"}, false)
+	handler, router := setupOIDCServer(t, idp, []string{"network-admins"})
 
 	cw := runOIDCLogin(t, idp, router)
 	if cw.Code != http.StatusSeeOther || cw.Header().Get("Location") != "/" {
@@ -182,7 +181,7 @@ func TestOIDC_FullLoginAndLogout(t *testing.T) {
 		t.Fatal("expected session cookie after successful SSO login")
 	}
 	sess, err := handler.GetSessionStore().GetSession(sc.Value)
-	if err != nil || sess.Username != "budi" || sess.AuthMethod != "oidc" || sess.IDToken == "" {
+	if err != nil || sess.Username != "budi" || sess.IDToken == "" {
 		t.Fatalf("unexpected session: %+v err=%v", sess, err)
 	}
 
@@ -213,7 +212,7 @@ func TestOIDC_FullLoginAndLogout(t *testing.T) {
 func TestOIDC_RejectsUserOutsideAllowedGroups(t *testing.T) {
 	idp := newFakeIdP(t)
 	idp.groups = []string{"interns"}
-	_, router := setupOIDCServer(t, idp, []string{"network-admins"}, false)
+	_, router := setupOIDCServer(t, idp, []string{"network-admins"})
 
 	cw := runOIDCLogin(t, idp, router)
 	if cw.Code != http.StatusForbidden || sessionCookie(cw) != nil {
@@ -224,7 +223,7 @@ func TestOIDC_RejectsUserOutsideAllowedGroups(t *testing.T) {
 func TestOIDC_RejectsNonceMismatch(t *testing.T) {
 	idp := newFakeIdP(t)
 	idp.badNonce = true
-	_, router := setupOIDCServer(t, idp, nil, false)
+	_, router := setupOIDCServer(t, idp, nil)
 
 	cw := runOIDCLogin(t, idp, router)
 	if cw.Code != http.StatusBadGateway || sessionCookie(cw) != nil {
@@ -234,7 +233,7 @@ func TestOIDC_RejectsNonceMismatch(t *testing.T) {
 
 func TestOIDC_RejectsStateMismatch(t *testing.T) {
 	idp := newFakeIdP(t)
-	_, router := setupOIDCServer(t, idp, nil, false)
+	_, router := setupOIDCServer(t, idp, nil)
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/login", nil))
@@ -245,63 +244,5 @@ func TestOIDC_RejectsStateMismatch(t *testing.T) {
 	router.ServeHTTP(cw, cb)
 	if cw.Code != http.StatusBadRequest || sessionCookie(cw) != nil {
 		t.Fatalf("expected 400 on state mismatch, got %d", cw.Code)
-	}
-}
-
-func TestOIDC_LoginPageAndLocalLoginToggle(t *testing.T) {
-	idp := newFakeIdP(t)
-
-	// Local login enabled: both SSO button and password form shown.
-	_, router := setupOIDCServer(t, idp, nil, false)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/login", nil))
-	body := w.Body.String()
-	if !strings.Contains(body, `href="/auth/login"`) || !strings.Contains(body, `action="/ui/login"`) {
-		t.Fatal("expected SSO button and local login form")
-	}
-
-	// Local login disabled: form hidden and password submit rejected.
-	_, router = setupOIDCServer(t, idp, nil, true)
-	w = httptest.NewRecorder()
-	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/login", nil))
-	body = w.Body.String()
-	if !strings.Contains(body, `href="/auth/login"`) || strings.Contains(body, `action="/ui/login"`) {
-		t.Fatal("expected only SSO button when local login disabled")
-	}
-
-	form := url.Values{"username": {"admin"}, "password": {"localpass"}}
-	req := httptest.NewRequest(http.MethodPost, "/ui/login", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	w = httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusForbidden || sessionCookie(w) != nil {
-		t.Fatalf("expected 403 for local login when disabled, got %d", w.Code)
-	}
-}
-
-func TestOIDC_DashboardRequiresAuthWhenOnlySSOConfigured(t *testing.T) {
-	idp := newFakeIdP(t)
-	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	handler := NewHandler(ipcheck.NewValidator(false, nil), mikrotik.NewMockClient(), logger)
-	handler.SetOIDC(oidc.NewProvider(oidc.Config{
-		IssuerURL: idp.issuer(), ClientID: idp.clientID, RedirectURL: "https://wl.example.com/auth/callback",
-	}), "/auth/callback", false)
-	router := SetupRouter(handler, "", logger)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/entries", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 when only SSO is configured and no session, got %d", w.Code)
-	}
-
-	// Empty local credentials must not grant a session.
-	form := url.Values{"username": {"admin"}, "password": {"x"}}
-	lreq := httptest.NewRequest(http.MethodPost, "/ui/login", strings.NewReader(form.Encode()))
-	lreq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	lw := httptest.NewRecorder()
-	router.ServeHTTP(lw, lreq)
-	if sessionCookie(lw) != nil {
-		t.Fatal("local login must not succeed when no local credentials are configured")
 	}
 }

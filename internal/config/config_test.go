@@ -28,6 +28,11 @@ func TestLoad_Success(t *testing.T) {
 		"OFFICE_PUBLIC_IPS":            "203.0.113.10,198.51.100.0/24",
 		"ALLOW_IPV6":                   "true",
 		"TZ":                           "Asia/Jakarta",
+		"AUTHENTIK_ISSUER_URL":         "https://auth.example.com/application/o/wl/",
+		"AUTHENTIK_CLIENT_ID":          "wl-client",
+		"AUTHENTIK_CLIENT_SECRET":      "akclientsecret",
+		"AUTHENTIK_REDIRECT_URL":       "https://wl.example.com/auth/callback",
+		"AUTHENTIK_ALLOWED_GROUPS":     "network-admins, noc",
 	})
 
 	cfg, err := Load()
@@ -80,6 +85,15 @@ func TestLoad_Success(t *testing.T) {
 	if strings.Contains(str, "supersecrettoken") {
 		t.Errorf("String() contains plain bearer token! Got: %s", str)
 	}
+	if strings.Contains(str, "akclientsecret") {
+		t.Errorf("String() contains Authentik client secret! Got: %s", str)
+	}
+	if len(cfg.AuthentikAllowedGroups) != 2 || cfg.AuthentikAllowedGroups[1] != "noc" {
+		t.Errorf("unexpected AuthentikAllowedGroups: %v", cfg.AuthentikAllowedGroups)
+	}
+	if strings.Join(cfg.AuthentikScopes, " ") != "openid profile email" {
+		t.Errorf("unexpected default scopes: %v", cfg.AuthentikScopes)
+	}
 	if !strings.Contains(str, "AuthBearer=enabled") {
 		t.Errorf("expected AuthBearer=enabled in String(), got: %s", str)
 	}
@@ -88,9 +102,12 @@ func TestLoad_Success(t *testing.T) {
 func TestLoad_Defaults(t *testing.T) {
 	// Set only required fields
 	setEnvs(t, map[string]string{
-		"MIKROTIK_HOST":     "10.0.0.1",
-		"MIKROTIK_USER":     "admin",
-		"MIKROTIK_PASSWORD": "pass",
+		"MIKROTIK_HOST":          "10.0.0.1",
+		"MIKROTIK_USER":          "admin",
+		"MIKROTIK_PASSWORD":      "pass",
+		"AUTHENTIK_ISSUER_URL":   "https://auth.example.com/application/o/wl/",
+		"AUTHENTIK_CLIENT_ID":    "wl-client",
+		"AUTHENTIK_REDIRECT_URL": "https://wl.example.com/auth/callback",
 	})
 	// Unset optional fields to test defaults
 	for _, k := range []string{
@@ -139,6 +156,14 @@ func TestLoad_MissingRequired(t *testing.T) {
 		{"missing host", map[string]string{"MIKROTIK_USER": "u", "MIKROTIK_PASSWORD": "p"}},
 		{"missing user", map[string]string{"MIKROTIK_HOST": "h", "MIKROTIK_PASSWORD": "p"}},
 		{"missing password", map[string]string{"MIKROTIK_HOST": "h", "MIKROTIK_USER": "u"}},
+		{"missing authentik issuer", map[string]string{"MIKROTIK_HOST": "h", "MIKROTIK_USER": "u", "MIKROTIK_PASSWORD": "p",
+			"AUTHENTIK_CLIENT_ID": "c", "AUTHENTIK_REDIRECT_URL": "https://wl.example.com/auth/callback"}},
+		{"missing authentik client id", map[string]string{"MIKROTIK_HOST": "h", "MIKROTIK_USER": "u", "MIKROTIK_PASSWORD": "p",
+			"AUTHENTIK_ISSUER_URL": "https://auth.example.com/application/o/wl/", "AUTHENTIK_REDIRECT_URL": "https://wl.example.com/auth/callback"}},
+		{"missing authentik redirect", map[string]string{"MIKROTIK_HOST": "h", "MIKROTIK_USER": "u", "MIKROTIK_PASSWORD": "p",
+			"AUTHENTIK_ISSUER_URL": "https://auth.example.com/application/o/wl/", "AUTHENTIK_CLIENT_ID": "c"}},
+		{"invalid authentik issuer", map[string]string{"MIKROTIK_HOST": "h", "MIKROTIK_USER": "u", "MIKROTIK_PASSWORD": "p",
+			"AUTHENTIK_ISSUER_URL": "auth.example.com", "AUTHENTIK_CLIENT_ID": "c", "AUTHENTIK_REDIRECT_URL": "https://wl.example.com/auth/callback"}},
 	}
 
 	for _, tt := range tests {

@@ -245,15 +245,11 @@ async function initPublicIPDetection() {
 // ==========================================================================
 
 function initHTMXEvents() {
-  // Automatically inject CSRF Token and Bearer Token into HTMX headers
+  // Automatically inject CSRF Token into HTMX headers
   document.body.addEventListener('htmx:configRequest', (evt) => {
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
     if (csrfToken) {
       evt.detail.headers['X-CSRF-Token'] = csrfToken;
-    }
-    const token = localStorage.getItem('jti_wl_token') || getCookie('auth_token');
-    if (token) {
-      evt.detail.headers['Authorization'] = `Bearer ${token}`;
     }
   });
 
@@ -430,38 +426,7 @@ function filterTableRows(query, mode = 'all') {
   });
 }
 
-// ==========================================================================
-// 6. TOKEN / AUTH PROMPT MODAL
-// ==========================================================================
-
-function promptAuthToken() {
-  const dialog = document.getElementById('modal-auth-token');
-  if (dialog && typeof dialog.showModal === 'function') {
-    dialog.showModal();
-  } else {
-    const token = prompt('Masukkan AUTH_BEARER_TOKEN:');
-    if (token) {
-      saveAuthToken(token);
-      location.reload();
-    }
-  }
-}
-
-function saveAuthToken(token) {
-  token = (token || '').trim();
-  if (!token) return;
-  localStorage.setItem('jti_wl_token', token);
-  document.cookie = `auth_token=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=2592000`;
-  showToast('Token autentikasi berhasil disimpan', 'success');
-}
-
 // Global functions for inline HTML event handlers
-window.saveAuthToken = saveAuthToken;
 window.showToast = showToast;
 window.showSwitchingOverlay = showSwitchingOverlay;
 window.hideSwitchingOverlay = hideSwitchingOverlay;
-
-function getCookie(name) {
-  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
-  return match ? decodeURIComponent(match[2]) : '';
-}

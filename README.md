@@ -7,7 +7,8 @@ Layanan HTTP sederhana, aman, dan *production-ready* yang dibangun dengan Go unt
 - **Web Portal UI Interaktif (HTMX)**: Antarmuka web modern, cepat, dan responsif dengan tema korporat PT Jagat Teknologi Indonesia. Mendukung auto-deteksi IP & hostname klien, pendaftaran/perpanjangan masa aktif IP, toggle izin Winbox, switching loading overlay, notifikasi toast, serta visualisasi tabel address-list MikroTik secara live.
 - **Otomatisasi Whitelist**: Menambahkan IP baru dengan timeout terbatas atau memperpanjang masa berlaku jika IP sudah ada (`POST /v1/whitelist` atau via Web UI).
 - **Identifikasi Hostname Target**: Komentar entri MikroTik disimpan dengan format `wl|<nama_hostname_target>` yang diambil dari parameter `hostname` klien, hasil resolusi reverse DNS IP target, atau fallback ke IP target jika tidak ditemukan.
-- **Autentikasi Bearer Token**: Mengamankan endpoint `/v1/whitelist` dengan Bearer Token (`Authorization: Bearer <token>`) yang diverifikasi dengan constant-time comparison (bebas timing attack). Endpoint `/healthz` tetap terbuka untuk health probe.
+- **SSO Authentik (wajib)**: Seluruh akses Web UI dan `/api/*` hanya melalui login Authentik (OpenID Connect + PKCE). Tidak ada login username/password lokal.
+- **Autentikasi Bearer Token (khusus script)**: Mengamankan endpoint `/v1/whitelist` dengan Bearer Token (`Authorization: Bearer <token>`) yang diverifikasi dengan constant-time comparison (bebas timing attack). Endpoint `/healthz` tetap terbuka untuk health probe.
 - **Auto-Unblock dari Abuse List**: Jika IP target terdaftar di address-list `port-forward-abuse`, entri tersebut otomatis dihapus dari list abuse sebelum didaftarkan ke `remote-whitelist`.
 - **Akses Layanan Winbox (Opsional)**: Dengan menyertakan parameter `winbox` di body request (`POST`), IP target otomatis ditambahkan ke daftar alamat yang diizinkan pada service Winbox MikroTik (`/ip service set [find name=winbox] address=([get [find name=winbox] address],<target_ip>/32)`). Pada `DELETE`, parameter `winbox` akan menghapus IP dari service Winbox.
 - **Pembersihan Bersih**: Menghapus IP dari whitelist (`DELETE /v1/whitelist`) hanya jika entri dibuat oleh sistem (berawalan komentar `wl|`), sehingga entri manual admin terlindungi.
@@ -77,27 +78,24 @@ cp .env.example .env
 | `MIKROTIK_PORT` | Integer | `8728` | Tidak | Port RouterOS API plaintext. |
 | `MIKROTIK_USER` | String | - | **Ya** | Username akun API MikroTik khusus layanan ini. |
 | `MIKROTIK_PASSWORD`| String | - | **Ya** | Password akun API MikroTik. |
-| `AUTH_BEARER_TOKEN` | String | `""` | Tidak | Token Bearer untuk memproteksi endpoint API `/v1/whitelist` dan Web UI jika password tidak diset. |
-| `WEB_ADMIN_USERNAME`| String | `admin` | Tidak | Username administrator untuk login Web UI Portal. |
-| `WEB_ADMIN_PASSWORD`| String | `AUTH_BEARER_TOKEN` | Tidak | Password login Web UI (dapat berupa string atau hash PBKDF2). Default mewarisi `AUTH_BEARER_TOKEN`. |
+| `AUTH_BEARER_TOKEN` | String | `""` | Tidak | Token Bearer khusus endpoint script `/v1/whitelist` (header `Authorization`). Kosong = endpoint `/v1/whitelist` dinonaktifkan. Token ini **tidak** bisa dipakai membuka Web UI. |
 | `WHITELIST_LIST_NAME` | String | `remote-whitelist` | Tidak | Nama firewall address-list target di MikroTik. |
 | `PORT_FORWARD_ABUSE_LIST_NAME` | String | `port-forward-abuse` | Tidak | Nama firewall address-list deteksi abuse di MikroTik (otomatis dibersihkan saat whitelist). |
 | `WHITELIST_TTL` | String | `8h` | Tidak | Masa berlaku IP di MikroTik (format RouterOS: `8h`, `12h`, `1d`). |
 | `OFFICE_PUBLIC_IPS` | String | `""` | Tidak | Daftar IP atau subnet publik kantor (dipisahkan koma) untuk ditolak agar tidak sengaja di-whitelist. |
 | `ALLOW_IPV6` | Boolean | `false` | Tidak | Set `true` untuk mengizinkan alamat IPv6 publik. |
 | `TZ` | String | `Asia/Jakarta` | Tidak | Zona waktu untuk kalkulasi timestamp kedaluwarsa. |
-| `AUTHENTIK_ISSUER_URL` | String | `""` | Tidak | URL issuer OIDC Authentik. Jika diisi, SSO Authentik aktif. |
-| `AUTHENTIK_CLIENT_ID` | String | - | Ya (jika SSO) | Client ID dari provider OAuth2/OpenID di Authentik. |
+| `AUTHENTIK_ISSUER_URL` | String | - | **Ya** | URL issuer OIDC Authentik, contoh `https://auth.example.com/application/o/wlservice/`. |
+| `AUTHENTIK_CLIENT_ID` | String | - | **Ya** | Client ID dari provider OAuth2/OpenID di Authentik. |
 | `AUTHENTIK_CLIENT_SECRET` | String | `""` | Tidak | Client Secret (wajib untuk client type *Confidential*). |
-| `AUTHENTIK_REDIRECT_URL` | String | - | Ya (jika SSO) | URL callback publik, contoh `https://wl.example.com/auth/callback`. |
+| `AUTHENTIK_REDIRECT_URL` | String | - | **Ya** | URL callback publik, contoh `https://wl.example.com/auth/callback`. |
 | `AUTHENTIK_SCOPES` | String | `openid profile email` | Tidak | Scope OIDC (dipisah spasi/koma). |
 | `AUTHENTIK_ALLOWED_GROUPS` | String | `""` | Tidak | Grup Authentik yang diizinkan (dipisah koma). Kosong = semua user yang lolos policy Authentik. |
 | `AUTHENTIK_POST_LOGOUT_URL` | String | `""` | Tidak | URL tujuan setelah logout dari Authentik, contoh `https://wl.example.com/login`. |
-| `AUTHENTIK_DISABLE_LOCAL_LOGIN` | Boolean | `false` | Tidak | `true` = sembunyikan form login lokal, hanya SSO. `AUTH_BEARER_TOKEN` untuk API tetap berlaku. |
 
 ### Integrasi SSO Authentik (OpenID Connect)
 
-Login Web UI dapat didelegasikan ke [Authentik](https://goauthentik.io) memakai OIDC Authorization Code Flow + PKCE. Token `id_token` diverifikasi (signature RS256/ES256/HS256 via JWKS, `iss`, `aud`, `exp`, `nonce`), lalu layanan membuat sesi lokal seperti login biasa.
+Seluruh login Web UI dilakukan lewat [Authentik](https://goauthentik.io) memakai OIDC Authorization Code Flow + PKCE; tidak ada login lokal. Token `id_token` diverifikasi (signature RS256/ES256/HS256 via JWKS, `iss`, `aud`, `exp`, `nonce`), lalu layanan membuat sesi lokal seperti login biasa.
 
 1. Di Authentik: **Applications → Providers → Create → OAuth2/OpenID Provider**
    - Client type: `Confidential`
@@ -114,7 +112,7 @@ Login Web UI dapat didelegasikan ke [Authentik](https://goauthentik.io) memakai 
    AUTHENTIK_ALLOWED_GROUPS=network-admins
    AUTHENTIK_POST_LOGOUT_URL=https://wl.example.com/login
    ```
-4. Halaman `/login` akan menampilkan tombol **Masuk dengan Authentik (SSO)**. Logout dari portal juga mengakhiri sesi di Authentik (RP-initiated logout).
+4. Membuka portal tanpa sesi otomatis diarahkan ke Authentik. Halaman `/login` hanya berisi tombol **Masuk dengan Authentik (SSO)** (dipakai setelah logout / saat error). Logout dari portal juga mengakhiri sesi di Authentik (RP-initiated logout).
 
 Endpoint: `GET /auth/login` (mulai SSO) dan path dari `AUTHENTIK_REDIRECT_URL` (callback, default `/auth/callback`). Pastikan reverse proxy meneruskan header `X-Forwarded-Proto: https` agar cookie diset `Secure`.
 
@@ -298,7 +296,7 @@ Fitur Web Portal:
   - Tombol **"Hapus Whitelist"** untuk membatalkan pendaftaran.
 - **Switching Overlay**: Animasi loading dan konfirmasi perpindahan status mirip dashboard ISP Switcher JTI.
 - **Tabel Live Firewall**: Menampilkan daftar seluruh IP yang sedang aktif ter-whitelist lengkap dengan sisa masa berlaku (timeout) dan filter pencarian real-time.
-- **Autentikasi Terintegrasi**: Jika `AUTH_BEARER_TOKEN` diaktifkan, portal menyediakan dialog input token yang tersimpan di cookie browser.
+- **Autentikasi SSO Authentik**: Portal hanya dapat diakses setelah login Authentik; sesi berlaku 12 jam (sliding) dan dilindungi CSRF token.
 
 ### 2. Menggunakan Helper Script
 

@@ -3,7 +3,6 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -386,235 +385,79 @@ func TestWebUI_APIStatusAndEntries(t *testing.T) {
 	}
 }
 
-func TestWebUI_BearerAuth_CookieAndQueryParam(t *testing.T) {
-	token := "secure-portal-token"
-	_, _, router := setupAuthenticatedTestServer(token)
+func TestWebUI_LoginPage_ShowsOnlySSO(t *testing.T) {
+	_, _, router := setupAuthenticatedTestServer("")
 
-	// 1. Access root without token via HTML browser -> returns 401 with login HTML page
-	reqHTML := httptest.NewRequest(http.MethodGet, "/", nil)
-	reqHTML.Header.Set("Accept", "text/html")
-	wHTML := httptest.NewRecorder()
-	router.ServeHTTP(wHTML, reqHTML)
-
-	if wHTML.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 Unauthorized, got %d", wHTML.Code)
-	}
-	if !strings.Contains(wHTML.Body.String(), "Bearer Auth Token") {
-		t.Errorf("expected login page with 'Bearer Auth Token'")
-	}
-
-	// 2. Access with valid query param ?token=... -> returns 200 and sets auth_token cookie
-	reqQuery := httptest.NewRequest(http.MethodGet, "/?token="+token, nil)
-	reqQuery.Header.Set("Accept", "text/html")
-	wQuery := httptest.NewRecorder()
-	router.ServeHTTP(wQuery, reqQuery)
-
-	if wQuery.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK with ?token=..., got %d", wQuery.Code)
-	}
-	cookies := wQuery.Result().Cookies()
-	var authCookie *http.Cookie
-	for _, c := range cookies {
-		if c.Name == "auth_token" {
-			authCookie = c
-			break
-		}
-	}
-	if authCookie == nil || authCookie.Value != token {
-		t.Errorf("expected auth_token cookie to be set with token value")
-	}
-
-	// 3. Access with valid auth_token cookie -> returns 200 OK
-	reqCookie := httptest.NewRequest(http.MethodGet, "/", nil)
-	reqCookie.AddCookie(&http.Cookie{Name: "auth_token", Value: token})
-	wCookie := httptest.NewRecorder()
-	router.ServeHTTP(wCookie, reqCookie)
-
-	if wCookie.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK with auth_token cookie, got %d", wCookie.Code)
-	}
-
-	// 4. POST /ui/login sets cookie and redirects
-	loginForm := url.Values{}
-	loginForm.Set("token", token)
-	reqLogin := httptest.NewRequest(http.MethodPost, "/ui/login", strings.NewReader(loginForm.Encode()))
-	reqLogin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	wLogin := httptest.NewRecorder()
-	router.ServeHTTP(wLogin, reqLogin)
-
-	if wLogin.Code != http.StatusSeeOther {
-		t.Fatalf("expected 303 See Other redirect on /ui/login, got %d", wLogin.Code)
-	}
-}
-
-func TestWebUI_LoginPage_Rendering(t *testing.T) {
-	token := "secure-test-token"
-	_, _, router := setupAuthenticatedTestServer(token)
-
-	req := httptest.NewRequest(http.MethodGet, "/login", nil)
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/login", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK on GET /login, got %d", w.Code)
 	}
-
 	body := w.Body.String()
 	if !strings.Contains(body, "PT Jagat Teknologi Indonesia") {
 		t.Errorf("expected login page to contain brand name")
 	}
-	if !strings.Contains(body, "Username Administrator") {
-		t.Errorf("expected login page to contain username field")
+	if !strings.Contains(body, `href="/auth/login"`) {
+		t.Errorf("expected Authentik SSO button")
 	}
-	if !strings.Contains(body, "Kata Sandi / Bearer Auth Token") {
-		t.Errorf("expected login page to contain password field")
+	if strings.Contains(body, `name="password"`) || strings.Contains(body, "<form") {
+		t.Errorf("login page must not contain a local login form")
 	}
-	if !strings.Contains(body, "csrf_token") {
-		t.Errorf("expected login page to contain csrf_token hidden field")
+
+	// Local login endpoint no longer exists (falls through to protected "/").
+	form := url.Values{"username": {"admin"}, "password": {"x"}}
+	req := httptest.NewRequest(http.MethodPost, "/ui/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	lw := httptest.NewRecorder()
+	router.ServeHTTP(lw, req)
+	for _, c := range lw.Result().Cookies() {
+		if c.Name == "jti_session_id" && c.Value != "" {
+			t.Fatal("POST /ui/login must not create a session")
+		}
 	}
 }
 
-func TestWebUI_Login_Success_SetsSecureHttpOnlySessionCookie(t *testing.T) {
-	token := "correct-admin-password"
-	handler, _, router := setupAuthenticatedTestServer(token)
-	handler.SetAuth("admin", token)
+func TestWebUI_RequiresSession(t *testing.T) {
+	token := "api-only-token"
+	_, _, router := setupAuthenticatedTestServer(token)
 
-	loginForm := url.Values{}
-	loginForm.Set("username", "admin")
-	loginForm.Set("password", token)
-
-	req := httptest.NewRequest(http.MethodPost, "/ui/login", strings.NewReader(loginForm.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// Browser navigation without session -> redirect to Authentik SSO
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept", "text/html")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("expected 303 See Other on successful login, got %d: %s", w.Code, w.Body.String())
-	}
-	if loc := w.Header().Get("Location"); loc != "/" {
-		t.Errorf("expected redirect to /, got %s", loc)
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/auth/login" {
+		t.Fatalf("expected 303 to /auth/login, got %d %q", w.Code, w.Header().Get("Location"))
 	}
 
-	cookies := w.Result().Cookies()
-	var sessionCookie *http.Cookie
-	for _, c := range cookies {
-		if c.Name == "jti_session_id" {
-			sessionCookie = c
-			break
+	// The script API bearer token must NOT grant Web UI / API access.
+	for _, path := range []string{"/", "/api/entries", "/api/status", "/ui/status", "/?token=" + token} {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.Header.Set("Authorization", "Bearer "+token)
+		rw := httptest.NewRecorder()
+		router.ServeHTTP(rw, r)
+		if rw.Code != http.StatusUnauthorized {
+			t.Errorf("%s: expected 401 with bearer token only, got %d", path, rw.Code)
 		}
 	}
 
-	if sessionCookie == nil {
-		t.Fatalf("expected jti_session_id cookie to be set")
-	}
-	if !sessionCookie.HttpOnly {
-		t.Errorf("expected jti_session_id to be HttpOnly")
-	}
-	if sessionCookie.SameSite != http.SameSiteLaxMode {
-		t.Errorf("expected SameSite=Lax, got %v", sessionCookie.SameSite)
-	}
-	if sessionCookie.Path != "/" {
-		t.Errorf("expected Path=/, got %s", sessionCookie.Path)
-	}
-
-	// Verify accessing / with the session cookie succeeds and renders user dashboard
-	reqDash := httptest.NewRequest(http.MethodGet, "/", nil)
-	reqDash.AddCookie(sessionCookie)
-	reqDash.Header.Set("Accept", "text/html")
-	wDash := httptest.NewRecorder()
-	router.ServeHTTP(wDash, reqDash)
-
-	if wDash.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK on / with session cookie, got %d: %s", wDash.Code, wDash.Body.String())
-	}
-	if !strings.Contains(wDash.Body.String(), "Keluar") {
-		t.Errorf("expected dashboard to contain logout button 'Keluar'")
-	}
-	if !strings.Contains(wDash.Body.String(), "hero-client-card") {
-		t.Errorf("expected dashboard to contain hero card")
-	}
-}
-
-func TestWebUI_Login_BruteForceLockout(t *testing.T) {
-	token := "super-secure-token"
-	handler, _, router := setupAuthenticatedTestServer(token)
-	handler.SetAuth("admin", token)
-
-	attackerIP := "198.51.100.77"
-
-	// Send 4 failed login attempts -> all should return 401 Unauthorized
-	for i := 1; i <= 4; i++ {
-		form := url.Values{}
-		form.Set("username", "admin")
-		form.Set("password", fmt.Sprintf("wrong-pass-%d", i))
-
-		req := httptest.NewRequest(http.MethodPost, "/ui/login", strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.RemoteAddr = attackerIP + ":12345"
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-
-		if w.Code != http.StatusUnauthorized {
-			t.Fatalf("attempt %d: expected 401 Unauthorized, got %d", i, w.Code)
-		}
-		if !strings.Contains(w.Body.String(), "salah") {
-			t.Errorf("attempt %d: expected error message with 'salah'", i)
-		}
-	}
-
-	// 5th attempt -> triggers brute force lockout (429 Too Many Requests)
-	form5 := url.Values{}
-	form5.Set("username", "admin")
-	form5.Set("password", "wrong-pass-5")
-
-	req5 := httptest.NewRequest(http.MethodPost, "/ui/login", strings.NewReader(form5.Encode()))
-	req5.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req5.RemoteAddr = attackerIP + ":12345"
-	w5 := httptest.NewRecorder()
-	router.ServeHTTP(w5, req5)
-
-	if w5.Code != http.StatusTooManyRequests {
-		t.Fatalf("attempt 5: expected 429 Too Many Requests, got %d", w5.Code)
-	}
-	if !strings.Contains(w5.Body.String(), "terkunci") {
-		t.Errorf("attempt 5: expected message containing 'terkunci', got: %s", w5.Body.String())
-	}
-
-	// Further attempt, even with the CORRECT password, should be blocked by rate limiter!
-	reqBlocked := httptest.NewRequest(http.MethodPost, "/ui/login", strings.NewReader(url.Values{
-		"username": {"admin"},
-		"password": {token},
-	}.Encode()))
-	reqBlocked.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	reqBlocked.RemoteAddr = attackerIP + ":12345"
-	wBlocked := httptest.NewRecorder()
-	router.ServeHTTP(wBlocked, reqBlocked)
-
-	if wBlocked.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected 429 Too Many Requests even with correct password during lockout, got %d", wBlocked.Code)
-	}
-
-	// GET /login from locked IP should show lockout error banner
-	reqPage := httptest.NewRequest(http.MethodGet, "/login", nil)
-	reqPage.RemoteAddr = attackerIP + ":12345"
-	wPage := httptest.NewRecorder()
-	router.ServeHTTP(wPage, reqPage)
-
-	if wPage.Code != http.StatusTooManyRequests {
-		t.Fatalf("expected 429 on GET /login from locked IP, got %d", wPage.Code)
-	}
-	if !strings.Contains(wPage.Body.String(), "terkunci") {
-		t.Errorf("expected login page to indicate lockout")
+	// HTMX request without session -> 401 (not a redirect into the SSO flow)
+	hx := httptest.NewRequest(http.MethodGet, "/ui/status", nil)
+	hx.Header.Set("HX-Request", "true")
+	hx.Header.Set("Accept", "text/html")
+	hw := httptest.NewRecorder()
+	router.ServeHTTP(hw, hx)
+	if hw.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for HTMX without session, got %d", hw.Code)
 	}
 }
 
 func TestWebUI_AntiCSRF_Protection(t *testing.T) {
 	token := "secure-token-123"
 	handler, mockMk, router := setupAuthenticatedTestServer(token)
-	handler.SetAuth("admin", token)
 
 	// Create valid user session
-	sess, err := handler.GetSessionStore().CreateSession("admin", "127.0.0.1", "test-agent")
+	sess, err := handler.GetSessionStore().CreateSession("admin", "127.0.0.1", "test-agent", "")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
@@ -675,9 +518,8 @@ func TestWebUI_AntiCSRF_Protection(t *testing.T) {
 func TestWebUI_Logout_RevokesSession(t *testing.T) {
 	token := "secure-token-logout"
 	handler, _, router := setupAuthenticatedTestServer(token)
-	handler.SetAuth("admin", token)
 
-	sess, err := handler.GetSessionStore().CreateSession("admin", "127.0.0.1", "test-agent")
+	sess, err := handler.GetSessionStore().CreateSession("admin", "127.0.0.1", "test-agent", "")
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}

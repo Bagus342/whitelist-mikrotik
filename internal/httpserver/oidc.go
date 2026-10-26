@@ -63,44 +63,29 @@ func (s *pendingAuthStore) take(state string) (pendingAuth, bool) {
 	return p, true
 }
 
-// SetOIDC enables Authentik (OIDC) single sign-on. callbackPath must match the
-// path of the redirect URL registered in Authentik.
-func (h *Handler) SetOIDC(p *oidc.Provider, callbackPath string, disableLocalLogin bool) {
+// SetOIDC configures Authentik (OIDC) single sign-on. callbackPath must match
+// the path of the redirect URL registered in Authentik. Must be called before
+// SetupRouter.
+func (h *Handler) SetOIDC(p *oidc.Provider, callbackPath string) {
 	h.oidc = p
 	h.oidcCallbackPath = callbackPath
-	h.localLoginDisabled = disableLocalLogin && p != nil
-	h.oidcPending = newPendingAuthStore()
-}
-
-// authRequired reports whether any authentication mechanism is configured.
-func (h *Handler) authRequired() bool {
-	return h.oidc != nil || h.authBearerToken != "" || h.adminPass != ""
 }
 
 // loginViewData builds the template data for login.html.
-func (h *Handler) loginViewData(username, errMsg, csrfToken string) map[string]any {
-	if username == "" {
-		username = h.adminUser
-	}
-	return map[string]any{
-		"Username":          username,
-		"ErrorMessage":      errMsg,
-		"CSRFToken":         csrfToken,
-		"OIDCEnabled":       h.oidc != nil,
-		"LocalLoginEnabled": !h.localLoginDisabled,
-	}
+func (h *Handler) loginViewData(errMsg string) map[string]any {
+	return map[string]any{"ErrorMessage": errMsg}
 }
 
 func (h *Handler) renderLoginError(w http.ResponseWriter, r *http.Request, status int, msg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	_ = loginTmpl.Execute(w, h.loginViewData("", msg, h.getOrCreatePreLoginCSRF(w, r)))
+	_ = loginTmpl.Execute(w, h.loginViewData(msg))
 }
 
 // HandleOIDCLogin starts the Authentik Authorization Code + PKCE flow.
 func (h *Handler) HandleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 	if h.oidc == nil {
-		http.NotFound(w, r)
+		h.renderLoginError(w, r, http.StatusServiceUnavailable, "SSO Authentik belum dikonfigurasi.")
 		return
 	}
 	SetAction(r.Context(), "oidc_login")
@@ -144,7 +129,7 @@ func (h *Handler) HandleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 // verifies the id_token and issues a local session cookie.
 func (h *Handler) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	if h.oidc == nil {
-		http.NotFound(w, r)
+		h.renderLoginError(w, r, http.StatusServiceUnavailable, "SSO Authentik belum dikonfigurasi.")
 		return
 	}
 	SetAction(r.Context(), "oidc_callback")
@@ -196,7 +181,7 @@ func (h *Handler) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	username := claims.DisplayName()
-	session, err := h.sessionStore.CreateOIDCSession(username, clientIP, r.UserAgent(), idToken)
+	session, err := h.sessionStore.CreateSession(username, clientIP, r.UserAgent(), idToken)
 	if err != nil {
 		h.logger.Error("failed to create session", "error", err)
 		http.Error(w, "Gagal membuat sesi", http.StatusInternalServerError)

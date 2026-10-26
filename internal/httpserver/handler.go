@@ -24,16 +24,12 @@ type Handler struct {
 	mkClient        mikrotik.Client
 	logger          *slog.Logger
 	sessionStore    *auth.SessionStore
-	rateLimiter     *auth.RateLimiter
-	adminUser       string
-	adminPass       string
 	authBearerToken string
 
-	// Authentik / OIDC single sign-on (nil when disabled)
-	oidc               *oidc.Provider
-	oidcCallbackPath   string
-	oidcPending        *pendingAuthStore
-	localLoginDisabled bool
+	// Authentik / OIDC single sign-on: the only way to access the Web UI.
+	oidc             *oidc.Provider
+	oidcCallbackPath string
+	oidcPending      *pendingAuthStore
 }
 
 // NewHandler constructs a new Handler.
@@ -43,27 +39,13 @@ func NewHandler(v *ipcheck.Validator, mk mikrotik.Client, l *slog.Logger) *Handl
 		mkClient:     mk,
 		logger:       l,
 		sessionStore: auth.NewSessionStore(12 * time.Hour),
-		rateLimiter:  auth.NewRateLimiter(5, 15*time.Minute, 5*time.Minute),
-		adminUser:    "admin",
+		oidcPending:  newPendingAuthStore(),
 	}
-}
-
-// SetAuth configures credentials for web authentication.
-func (h *Handler) SetAuth(user, pass string) {
-	if strings.TrimSpace(user) != "" {
-		h.adminUser = strings.TrimSpace(user)
-	}
-	h.adminPass = strings.TrimSpace(pass)
 }
 
 // GetSessionStore returns the session store.
 func (h *Handler) GetSessionStore() *auth.SessionStore {
 	return h.sessionStore
-}
-
-// GetRateLimiter returns the brute force rate limiter.
-func (h *Handler) GetRateLimiter() *auth.RateLimiter {
-	return h.rateLimiter
 }
 
 // JSONResponse represents a generic JSON envelope for responses.
@@ -447,18 +429,16 @@ func (h *Handler) HandleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 // SetupRouter initializes the HTTP multiplexer with all configured routes and middleware.
-// If authBearerToken is non-empty, protected routes require Bearer or session authentication.
-// /healthz and /static/ remain unauthenticated.
+// Web UI and /api/* routes require an Authentik (OIDC) session. /v1/whitelist
+// accepts only the Bearer token (for scripts) and is disabled when no token is
+// configured. /healthz, /static/, /login and the SSO endpoints are public.
 func SetupRouter(h *Handler, authBearerToken string, logger *slog.Logger) http.Handler {
 	trimmedToken := strings.TrimSpace(authBearerToken)
 	h.authBearerToken = trimmedToken
-	if trimmedToken != "" && h.adminPass == "" {
-		h.adminPass = trimmedToken
-	}
 
 	mux := http.NewServeMux()
 
-	webAuth := h.WebAuthMiddleware(trimmedToken)
+	webAuth := h.WebAuthMiddleware()
 	csrfMw := h.CSRFMiddleware()
 	apiAuth := BearerAuthMiddleware(trimmedToken, logger)
 
@@ -468,20 +448,11 @@ func SetupRouter(h *Handler, authBearerToken string, logger *slog.Logger) http.H
 	// Health check endpoint (always unauthenticated)
 	mux.HandleFunc("/healthz", h.HandleHealthz)
 
-	// Web UI dedicated login & logout routes
-	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			h.HandleLoginSubmit(w, r)
-			return
-		}
-		h.HandleLoginPage(w, r)
-	})
-	mux.HandleFunc("/ui/login", h.HandleLoginSubmit)
+	// Login page (Authentik SSO button), logout and SSO endpoints
+	mux.HandleFunc("/login", h.HandleLoginPage)
 	mux.HandleFunc("/ui/logout", h.HandleLogout)
-
-	// Authentik (OIDC) single sign-on
-	if h.oidc != nil {
-		mux.HandleFunc("/auth/login", h.HandleOIDCLogin)
+	mux.HandleFunc("/auth/login", h.HandleOIDCLogin)
+	if h.oidcCallbackPath != "" {
 		mux.HandleFunc(h.oidcCallbackPath, h.HandleOIDCCallback)
 	}
 

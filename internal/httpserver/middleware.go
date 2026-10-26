@@ -220,50 +220,31 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// BearerAuthMiddleware verifies the Authorization: Bearer <token> header, auth_token cookie, or token query param.
-// If expectedToken is empty, authentication is disabled and requests pass through directly.
-// If expectedToken is non-empty, requests must provide a matching Bearer token,
-// otherwise a 401 Unauthorized response is returned.
+// BearerAuthMiddleware protects the script API (/v1/whitelist) with the
+// Authorization: Bearer <token> header. If expectedToken is empty the API is
+// disabled and every request is rejected: all interactive access goes through
+// Authentik.
 func BearerAuthMiddleware(expectedToken string, logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		trimmedExpected := strings.TrimSpace(expectedToken)
-		if trimmedExpected == "" {
-			return next
-		}
 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			token := ""
-			if strings.HasPrefix(authHeader, "Bearer ") {
-				token = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
-			} else if strings.HasPrefix(authHeader, "bearer ") {
-				token = strings.TrimSpace(strings.TrimPrefix(authHeader, "bearer "))
-			} else if cookie, err := r.Cookie("auth_token"); err == nil && cookie.Value != "" {
-				token = strings.TrimSpace(cookie.Value)
-			} else if qToken := r.URL.Query().Get("token"); qToken != "" {
-				token = strings.TrimSpace(qToken)
+			if len(authHeader) > 7 && strings.EqualFold(authHeader[:7], "Bearer ") {
+				token = strings.TrimSpace(authHeader[7:])
 			}
 
 			// Constant-time comparison to prevent timing attacks
-			if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(trimmedExpected)) != 1 {
+			if trimmedExpected == "" || token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(trimmedExpected)) != 1 {
 				reqID := GetRequestID(r.Context())
 				SetAction(r.Context(), "unauthorized")
 				logger.Warn("unauthorized request: missing or invalid bearer token",
 					"request_id", reqID,
 					"source_ip", extractSourceIP(r),
 					"path", r.URL.Path,
+					"api_enabled", trimmedExpected != "",
 				)
-
-				// For browser requests to root path, show login page
-				if r.URL.Path == "/" && strings.Contains(r.Header.Get("Accept"), "text/html") && r.Method == http.MethodGet {
-					w.Header().Set("Content-Type", "text/html; charset=utf-8")
-					w.WriteHeader(http.StatusUnauthorized)
-					_ = loginTmpl.Execute(w, map[string]any{
-						"Username":  "admin",
-						"CSRFToken": "",
-					})
-					return
-				}
 
 				w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 				writeResponse(w, r, http.StatusUnauthorized, "ERROR unauthorized", JSONResponse{
@@ -274,58 +255,17 @@ func BearerAuthMiddleware(expectedToken string, logger *slog.Logger) func(http.H
 				return
 			}
 
-			// If token was passed via query, set cookie for convenience
-			if r.URL.Query().Get("token") != "" {
-				http.SetCookie(w, &http.Cookie{
-					Name:     "auth_token",
-					Value:    token,
-					Path:     "/",
-					SameSite: http.SameSiteLaxMode,
-					MaxAge:   30 * 86400,
-				})
-			}
-
 			next.ServeHTTP(w, r)
 		})
 	}
 }
 
-// getOrCreatePreLoginCSRF generates or returns a CSRF token for the unauthenticated login form.
-func (h *Handler) getOrCreatePreLoginCSRF(w http.ResponseWriter, r *http.Request) string {
-	if cookie, err := r.Cookie("jti_csrf"); err == nil && len(cookie.Value) == 64 {
-		return cookie.Value
-	}
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "csrf-fallback-" + generateRequestID()
-	}
-	token := hex.EncodeToString(b)
-	http.SetCookie(w, &http.Cookie{
-		Name:     "jti_csrf",
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   isHTTPS(r),
-		MaxAge:   1800,
-	})
-	return token
-}
-
-// WebAuthMiddleware authenticates web UI requests using session cookies or Bearer tokens.
-func (h *Handler) WebAuthMiddleware(authBearerToken string) func(http.Handler) http.Handler {
+// WebAuthMiddleware requires a valid session created by Authentik SSO.
+// Unauthenticated browser navigations are redirected to the SSO flow; API and
+// HTMX requests receive 401.
+func (h *Handler) WebAuthMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			expectedToken := strings.TrimSpace(authBearerToken)
-			expectedPass := strings.TrimSpace(h.adminPass)
-
-			// If no authentication is configured, allow all requests
-			if !h.authRequired() {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// 1. Check jti_session_id cookie
 			if cookie, err := r.Cookie("jti_session_id"); err == nil && cookie.Value != "" {
 				if sess, err := h.sessionStore.GetSession(cookie.Value); err == nil && sess != nil {
 					ctx := context.WithValue(r.Context(), contextKeySession, sess)
@@ -334,75 +274,17 @@ func (h *Handler) WebAuthMiddleware(authBearerToken string) func(http.Handler) h
 				}
 			}
 
-			// 2. Check Authorization: Bearer <token>, auth_token cookie, or ?token= query parameter
-			authHeader := r.Header.Get("Authorization")
-			var token string
-			if strings.HasPrefix(authHeader, "Bearer ") {
-				token = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
-			} else if strings.HasPrefix(authHeader, "bearer ") {
-				token = strings.TrimSpace(strings.TrimPrefix(authHeader, "bearer "))
-			} else if cookie, err := r.Cookie("auth_token"); err == nil && cookie.Value != "" {
-				token = strings.TrimSpace(cookie.Value)
-			} else if qToken := r.URL.Query().Get("token"); qToken != "" {
-				token = strings.TrimSpace(qToken)
-			}
-
-			if token != "" {
-				match := false
-				if expectedToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(expectedToken)) == 1 {
-					match = true
-				}
-				if !match && expectedPass != "" && !h.localLoginDisabled && auth.VerifyPassword(token, expectedPass) {
-					match = true
-				}
-
-				if match {
-					// Valid token: create or reuse session for seamless browser interaction
-					sess, err := h.sessionStore.CreateSession(h.adminUser, extractSourceIP(r), r.UserAgent())
-					if err == nil && sess != nil {
-						http.SetCookie(w, &http.Cookie{
-							Name:     "jti_session_id",
-							Value:    sess.ID,
-							Path:     "/",
-							HttpOnly: true,
-							SameSite: http.SameSiteLaxMode,
-							Secure:   isHTTPS(r),
-							MaxAge:   int(12 * time.Hour / time.Second),
-						})
-						http.SetCookie(w, &http.Cookie{
-							Name:     "auth_token",
-							Value:    token,
-							Path:     "/",
-							SameSite: http.SameSiteLaxMode,
-							Secure:   isHTTPS(r),
-							MaxAge:   int(12 * time.Hour / time.Second),
-						})
-						ctx := context.WithValue(r.Context(), contextKeySession, sess)
-						next.ServeHTTP(w, r.WithContext(ctx))
-						return
-					}
-				}
-			}
-
-			// Not authenticated
 			reqID := GetRequestID(r.Context())
 			SetAction(r.Context(), "unauthorized")
 
-			// If browser navigating via HTML
-			if strings.Contains(r.Header.Get("Accept"), "text/html") {
-				if r.URL.Path == "/" && r.Method == http.MethodGet {
-					csrfToken := h.getOrCreatePreLoginCSRF(w, r)
-					w.Header().Set("Content-Type", "text/html; charset=utf-8")
-					w.WriteHeader(http.StatusUnauthorized)
-					_ = loginTmpl.Execute(w, h.loginViewData("", "", csrfToken))
-					return
-				}
-				http.Redirect(w, r, "/login", http.StatusSeeOther)
+			// Browser page navigation (not HTMX): send to Authentik login
+			if r.Method == http.MethodGet && r.Header.Get("HX-Request") == "" &&
+				strings.Contains(r.Header.Get("Accept"), "text/html") {
+				http.Redirect(w, r, "/auth/login", http.StatusSeeOther)
 				return
 			}
 
-			// For API or HTMX AJAX requests, return 401
-			w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
+			// API/HTMX: 401 (app.js redirects HTMX clients to /login)
 			writeResponse(w, r, http.StatusUnauthorized, "ERROR unauthorized", JSONResponse{
 				Status:    "error",
 				Message:   "unauthorized",
@@ -423,13 +305,7 @@ func (h *Handler) CSRFMiddleware() func(http.Handler) http.Handler {
 
 			sess := GetSession(r.Context())
 			if sess == nil {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Skip CSRF check for API tokens
-			if sess.CSRFToken == "" || sess.CSRFToken == "bearer-auth" {
-				next.ServeHTTP(w, r)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
 
@@ -453,4 +329,3 @@ func (h *Handler) CSRFMiddleware() func(http.Handler) http.Handler {
 		})
 	}
 }
-

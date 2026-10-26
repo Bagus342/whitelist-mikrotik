@@ -19,8 +19,6 @@ type Config struct {
 	MikrotikUser             string
 	MikrotikPassword         string
 	AuthBearerToken          string
-	WebAdminUser             string
-	WebAdminPassword         string
 	WhitelistListName        string
 	PortForwardAbuseListName string
 	WhitelistTTL             string        // Format accepted by RouterOS (e.g., "8h")
@@ -30,20 +28,14 @@ type Config struct {
 	Timezone                 string
 	Location                 *time.Location
 
-	// Authentik / OIDC single sign-on (enabled when AuthentikIssuerURL is set)
-	AuthentikIssuerURL         string
-	AuthentikClientID          string
-	AuthentikClientSecret      string
-	AuthentikRedirectURL       string
-	AuthentikScopes            []string
-	AuthentikAllowedGroups     []string
-	AuthentikPostLogoutURL     string
-	AuthentikDisableLocalLogin bool
-}
-
-// AuthentikEnabled reports whether Authentik SSO is configured.
-func (c *Config) AuthentikEnabled() bool {
-	return c.AuthentikIssuerURL != ""
+	// Authentik / OIDC single sign-on (the only way to access the Web UI)
+	AuthentikIssuerURL     string
+	AuthentikClientID      string
+	AuthentikClientSecret  string
+	AuthentikRedirectURL   string
+	AuthentikScopes        []string
+	AuthentikAllowedGroups []string
+	AuthentikPostLogoutURL string
 }
 
 // Load reads and validates configuration from environment variables.
@@ -110,37 +102,24 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid OFFICE_PUBLIC_IPS: %w", err)
 	}
 
-	webAdminUser := getEnv("WEB_ADMIN_USERNAME", "admin")
-	webAdminPassword := os.Getenv("WEB_ADMIN_PASSWORD")
-	if webAdminPassword == "" {
-		webAdminPassword = authBearerToken
-	}
-
 	akIssuer := getEnv("AUTHENTIK_ISSUER_URL", "")
+	if akIssuer == "" {
+		return nil, errors.New("AUTHENTIK_ISSUER_URL is required")
+	}
+	if err := requireHTTPURL("AUTHENTIK_ISSUER_URL", akIssuer); err != nil {
+		return nil, err
+	}
 	akClientID := getEnv("AUTHENTIK_CLIENT_ID", "")
+	if akClientID == "" {
+		return nil, errors.New("AUTHENTIK_CLIENT_ID is required")
+	}
 	akClientSecret := strings.TrimSpace(os.Getenv("AUTHENTIK_CLIENT_SECRET"))
 	akRedirect := getEnv("AUTHENTIK_REDIRECT_URL", "")
-	akDisableLocal := false
-	if akIssuer != "" {
-		if err := requireHTTPURL("AUTHENTIK_ISSUER_URL", akIssuer); err != nil {
-			return nil, err
-		}
-		if akClientID == "" {
-			return nil, errors.New("AUTHENTIK_CLIENT_ID is required when AUTHENTIK_ISSUER_URL is set")
-		}
-		if akRedirect == "" {
-			return nil, errors.New("AUTHENTIK_REDIRECT_URL is required when AUTHENTIK_ISSUER_URL is set")
-		}
-		if err := requireHTTPURL("AUTHENTIK_REDIRECT_URL", akRedirect); err != nil {
-			return nil, err
-		}
-		if v := os.Getenv("AUTHENTIK_DISABLE_LOCAL_LOGIN"); v != "" {
-			b, err := strconv.ParseBool(v)
-			if err != nil {
-				return nil, fmt.Errorf("invalid AUTHENTIK_DISABLE_LOCAL_LOGIN: %w", err)
-			}
-			akDisableLocal = b
-		}
+	if akRedirect == "" {
+		return nil, errors.New("AUTHENTIK_REDIRECT_URL is required")
+	}
+	if err := requireHTTPURL("AUTHENTIK_REDIRECT_URL", akRedirect); err != nil {
+		return nil, err
 	}
 	akPostLogout := getEnv("AUTHENTIK_POST_LOGOUT_URL", "")
 	if akPostLogout != "" {
@@ -156,8 +135,6 @@ func Load() (*Config, error) {
 		MikrotikUser:             mkUser,
 		MikrotikPassword:         mkPassword,
 		AuthBearerToken:          authBearerToken,
-		WebAdminUser:             webAdminUser,
-		WebAdminPassword:         webAdminPassword,
 		WhitelistListName:        listName,
 		PortForwardAbuseListName: abuseListName,
 		WhitelistTTL:             ttlStr,
@@ -167,14 +144,13 @@ func Load() (*Config, error) {
 		Timezone:                 tzStr,
 		Location:                 loc,
 
-		AuthentikIssuerURL:         akIssuer,
-		AuthentikClientID:          akClientID,
-		AuthentikClientSecret:      akClientSecret,
-		AuthentikRedirectURL:       akRedirect,
-		AuthentikScopes:            splitList(getEnv("AUTHENTIK_SCOPES", "openid profile email"), " ,"),
-		AuthentikAllowedGroups:     splitList(os.Getenv("AUTHENTIK_ALLOWED_GROUPS"), ","),
-		AuthentikPostLogoutURL:     akPostLogout,
-		AuthentikDisableLocalLogin: akDisableLocal,
+		AuthentikIssuerURL:     akIssuer,
+		AuthentikClientID:      akClientID,
+		AuthentikClientSecret:  akClientSecret,
+		AuthentikRedirectURL:   akRedirect,
+		AuthentikScopes:        splitList(getEnv("AUTHENTIK_SCOPES", "openid profile email"), " ,"),
+		AuthentikAllowedGroups: splitList(os.Getenv("AUTHENTIK_ALLOWED_GROUPS"), ","),
+		AuthentikPostLogoutURL: akPostLogout,
 	}, nil
 }
 
@@ -185,17 +161,14 @@ func (c *Config) String() string {
 		officeIPs = append(officeIPs, p.String())
 	}
 	authStatus := "disabled"
-	if c.AuthBearerToken != "" || c.WebAdminPassword != "" {
+	if c.AuthBearerToken != "" {
 		authStatus = "enabled"
 	}
-	authentik := "disabled"
-	if c.AuthentikEnabled() {
-		authentik = fmt.Sprintf("%s(client=%s groups=[%s] localLogin=%t)", c.AuthentikIssuerURL, c.AuthentikClientID,
-			strings.Join(c.AuthentikAllowedGroups, ","), !c.AuthentikDisableLocalLogin)
-	}
+	authentik := fmt.Sprintf("%s(client=%s groups=[%s])", c.AuthentikIssuerURL, c.AuthentikClientID,
+		strings.Join(c.AuthentikAllowedGroups, ","))
 	return fmt.Sprintf(
-		"ListenAddr=%s MikrotikHost=%s:%d MikrotikUser=%s AuthBearer=%s WebAdminUser=%s WhitelistListName=%s PortForwardAbuseListName=%s WhitelistTTL=%s OfficeIPs=[%s] AllowIPv6=%t TZ=%s Authentik=%s",
-		c.ListenAddr, c.MikrotikHost, c.MikrotikPort, c.MikrotikUser, authStatus, c.WebAdminUser, c.WhitelistListName, c.PortForwardAbuseListName, c.WhitelistTTL,
+		"ListenAddr=%s MikrotikHost=%s:%d MikrotikUser=%s AuthBearer=%s WhitelistListName=%s PortForwardAbuseListName=%s WhitelistTTL=%s OfficeIPs=[%s] AllowIPv6=%t TZ=%s Authentik=%s",
+		c.ListenAddr, c.MikrotikHost, c.MikrotikPort, c.MikrotikUser, authStatus, c.WhitelistListName, c.PortForwardAbuseListName, c.WhitelistTTL,
 		strings.Join(officeIPs, ","), c.AllowIPv6, c.Timezone, authentik,
 	)
 }

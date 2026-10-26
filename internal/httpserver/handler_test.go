@@ -25,8 +25,33 @@ func setupTestServer() (*Handler, *mikrotik.MockClient, http.Handler) {
 	})
 	mockMk := mikrotik.NewMockClient()
 	handler := NewHandler(validator, mockMk, logger)
-	router := SetupRouter(handler, "", logger)
-	return handler, mockMk, router
+	router := SetupRouter(handler, testAPIToken, logger)
+	return handler, mockMk, withTestAuth(handler, router)
+}
+
+const testAPIToken = "test-api-token"
+
+// withTestAuth simulates an already authenticated client: requests to the
+// script API get the Bearer token, all other requests get an Authentik
+// session cookie and its CSRF token, unless the test set them explicitly.
+func withTestAuth(h *Handler, next http.Handler) http.Handler {
+	sess, err := h.GetSessionStore().CreateSession("budi", "127.0.0.1", "test-agent", "")
+	if err != nil {
+		panic(err)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/") {
+			if r.Header.Get("Authorization") == "" {
+				r.Header.Set("Authorization", "Bearer "+testAPIToken)
+			}
+		} else if _, err := r.Cookie("jti_session_id"); err != nil {
+			r.AddCookie(&http.Cookie{Name: "jti_session_id", Value: sess.ID})
+			if r.Header.Get("X-CSRF-Token") == "" {
+				r.Header.Set("X-CSRF-Token", sess.CSRFToken)
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func TestHandler_PostWhitelist_AddNew(t *testing.T) {
@@ -557,6 +582,42 @@ func TestHandler_BearerAuth_MissingToken_JSON(t *testing.T) {
 	}
 	if resp.Status != "error" || resp.Message != "unauthorized" {
 		t.Errorf("unexpected JSON response: %+v", resp)
+	}
+}
+
+func TestHandler_BearerAuth_EmptyTokenDisablesAPI(t *testing.T) {
+	_, _, router := setupAuthenticatedTestServer("")
+
+	form := url.Values{}
+	form.Set("ip", "203.0.113.55")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/whitelist", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer ")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when AUTH_BEARER_TOKEN is empty, got %d", w.Code)
+	}
+}
+
+func TestHandler_BearerAuth_QueryTokenRejected(t *testing.T) {
+	token := "valid-secret-token"
+	_, _, router := setupAuthenticatedTestServer(token)
+
+	form := url.Values{}
+	form.Set("ip", "203.0.113.55")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/whitelist?token="+token, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for token in query string, got %d", w.Code)
 	}
 }
 

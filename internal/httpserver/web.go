@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"whitelist-mikrotik/internal/auth"
 	"whitelist-mikrotik/internal/mikrotik"
 )
 
@@ -92,8 +90,6 @@ func (h *Handler) getStatusOrFallback(r *http.Request, targetIP string) *mikroti
 	if sess := GetSession(ctx); sess != nil {
 		status.Username = sess.Username
 		status.CSRFToken = sess.CSRFToken
-	} else if h.adminUser != "" {
-		status.Username = h.adminUser
 	}
 	return status
 }
@@ -379,9 +375,8 @@ func HandleStatic() http.Handler {
 	return http.StripPrefix("/static/", http.FileServer(http.FS(subFS)))
 }
 
-// HandleLoginPage renders the dedicated login portal.
+// HandleLoginPage renders the login portal with the Authentik SSO button.
 func (h *Handler) HandleLoginPage(w http.ResponseWriter, r *http.Request) {
-	// If already logged in with valid session, redirect to dashboard
 	if cookie, err := r.Cookie("jti_session_id"); err == nil && cookie.Value != "" {
 		if sess, err := h.sessionStore.GetSession(cookie.Value); err == nil && sess != nil {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -389,175 +384,16 @@ func (h *Handler) HandleLoginPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	clientIP := extractSourceIP(r)
-	var errMsg string
-	isLocked, remaining := h.rateLimiter.CheckLimit(clientIP)
-	if isLocked {
-		errMsg = fmt.Sprintf("Alamat IP Anda (%s) terkunci karena terlalu banyak percobaan login gagal. Silakan coba lagi dalam %d menit.", clientIP, int(remaining.Minutes())+1)
-	}
-
-	csrfToken := h.getOrCreatePreLoginCSRF(w, r)
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if isLocked {
-		w.WriteHeader(http.StatusTooManyRequests)
-	} else {
-		w.WriteHeader(http.StatusOK)
-	}
-
-	_ = loginTmpl.Execute(w, h.loginViewData("", errMsg, csrfToken))
+	_ = loginTmpl.Execute(w, h.loginViewData(""))
 }
 
-// HandleLoginSubmit processes login credentials and issues session cookies.
-func (h *Handler) HandleLoginSubmit(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-
-	clientIP := extractSourceIP(r)
-
-	if h.localLoginDisabled {
-		h.renderLoginError(w, r, http.StatusForbidden, "Login lokal dinonaktifkan. Gunakan tombol Masuk dengan Authentik.")
-		return
-	}
-
-	// 1. Rate limiter / brute force check
-	if isLocked, remaining := h.rateLimiter.CheckLimit(clientIP); isLocked {
-		h.logger.Warn("login attempt from locked IP", "ip", clientIP)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusTooManyRequests)
-		_ = loginTmpl.Execute(w, h.loginViewData("",
-			fmt.Sprintf("Terlalu banyak percobaan gagal. IP Anda terkunci selama %d menit.", int(remaining.Minutes())+1),
-			h.getOrCreatePreLoginCSRF(w, r)))
-		return
-	}
-
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Format form tidak valid", http.StatusBadRequest)
-		return
-	}
-
-	// 2. Anti-CSRF verification for browser form submission
-	reqCSRF := strings.TrimSpace(r.FormValue("csrf_token"))
-	if csrfCookie, err := r.Cookie("jti_csrf"); err == nil && csrfCookie.Value != "" {
-		if !auth.VerifyCSRF(reqCSRF, csrfCookie.Value) {
-			h.logger.Warn("login CSRF verification failed", "ip", clientIP)
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusForbidden)
-			_ = loginTmpl.Execute(w, h.loginViewData("", "Token sesi form kedaluwarsa. Silakan muat ulang halaman.", h.getOrCreatePreLoginCSRF(w, r)))
-			return
-		}
-	}
-
-	username := strings.TrimSpace(r.FormValue("username"))
-	password := strings.TrimSpace(r.FormValue("password"))
-	if password == "" {
-		password = strings.TrimSpace(r.FormValue("token"))
-	}
-	if username == "" {
-		username = h.adminUser
-	}
-
-	expectedToken := strings.TrimSpace(h.authBearerToken)
-	expectedPass := strings.TrimSpace(h.adminPass)
-
-	authenticated := false
-	if expectedToken == "" && expectedPass == "" && h.oidc == nil {
-		authenticated = true
-	} else {
-		expectedUser := h.adminUser
-		userMatch := false
-		if expectedUser == "" || subtle.ConstantTimeCompare([]byte(username), []byte(expectedUser)) == 1 {
-			userMatch = true
-		}
-
-		passMatch := false
-		if expectedPass != "" && auth.VerifyPassword(password, expectedPass) {
-			passMatch = true
-		}
-		if !passMatch && expectedToken != "" && subtle.ConstantTimeCompare([]byte(password), []byte(expectedToken)) == 1 {
-			passMatch = true
-		}
-
-		// Dummy work if username didn't match to equalize timing
-		if !userMatch {
-			_ = auth.VerifyPassword(password, "dummy-salt-hash-constant-timing")
-		}
-
-		if userMatch && passMatch {
-			authenticated = true
-		}
-	}
-
-	if !authenticated {
-		isLocked, remaining, failures := h.rateLimiter.RecordFailure(clientIP)
-		h.logger.Warn("failed login attempt",
-			"ip", clientIP,
-			"username", username,
-			"failures", failures,
-			"locked", isLocked,
-		)
-
-		status := http.StatusUnauthorized
-		var errMsg string
-		if isLocked {
-			status = http.StatusTooManyRequests
-			errMsg = fmt.Sprintf("Terlalu banyak percobaan gagal (%d). Alamat IP Anda terkunci selama %d menit.", failures, int(remaining.Minutes())+1)
-		} else {
-			errMsg = fmt.Sprintf("Username atau kata sandi salah. Percobaan gagal: %d/5.", failures)
-		}
-
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(status)
-		_ = loginTmpl.Execute(w, h.loginViewData(username, errMsg, h.getOrCreatePreLoginCSRF(w, r)))
-		return
-	}
-
-	// Login succeeded
-	h.rateLimiter.RecordSuccess(clientIP)
-
-	loginUser := username
-	if loginUser == "" {
-		loginUser = h.adminUser
-	}
-
-	session, err := h.sessionStore.CreateSession(loginUser, clientIP, r.UserAgent())
-	if err != nil {
-		h.logger.Error("failed to create session", "error", err)
-		http.Error(w, "Gagal membuat sesi", http.StatusInternalServerError)
-		return
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "jti_session_id",
-		Value:    session.ID,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   isHTTPS(r),
-		MaxAge:   int(12 * time.Hour / time.Second),
-	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "auth_token",
-		Value:    password,
-		Path:     "/",
-		SameSite: http.SameSiteLaxMode,
-		Secure:   isHTTPS(r),
-		MaxAge:   int(12 * time.Hour / time.Second),
-	})
-
-	h.logger.Info("user authenticated successfully", "ip", clientIP, "username", loginUser)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
-// HandleLogout revokes the user's session and clears cookies.
+// HandleLogout revokes the local session and ends the Authentik session
+// (RP-initiated logout) when the provider supports it.
 func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	redirectTo := "/login"
 	if cookie, err := r.Cookie("jti_session_id"); err == nil && cookie.Value != "" {
-		// For SSO sessions also end the Authentik session (RP-initiated logout).
-		if sess, err := h.sessionStore.GetSession(cookie.Value); err == nil && sess.AuthMethod == "oidc" && h.oidc != nil {
+		if sess, err := h.sessionStore.GetSession(cookie.Value); err == nil && h.oidc != nil {
 			if u := h.oidc.EndSessionURL(r.Context(), sess.IDToken); u != "" {
 				redirectTo = u
 			}
@@ -570,16 +406,6 @@ func (h *Handler) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   isHTTPS(r),
-		MaxAge:   -1,
-		Expires:  time.Unix(0, 0),
-	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "auth_token",
-		Value:    "",
-		Path:     "/",
 		SameSite: http.SameSiteLaxMode,
 		Secure:   isHTTPS(r),
 		MaxAge:   -1,
